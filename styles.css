@@ -564,85 +564,95 @@ aside.properties[hidden] { display: none; }
 
 .layer-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 12px 12px 8px;
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 6px 6px 0;
   background: var(--panel-2);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
+  position: relative;
 }
 .layer-tabs .layer-tab {
+  flex: 1 1 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  gap: 6px;
+  height: 34px;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px 8px 0 0;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .02em;
   cursor: pointer;
   user-select: none;
-  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), width var(--t-base), box-shadow var(--t-fast);
+  transition: background var(--t-fast), color var(--t-fast);
   position: relative;
 }
 .layer-tabs .layer-tab:hover {
   color: var(--text);
-  border-color: var(--border-strong);
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15,23,42,.06);
+  background: rgba(15,23,42,0.04);
+  box-shadow: none;
 }
 .layer-tabs .layer-tab.active {
   background: var(--accent-soft);
-  border-color: rgba(58,100,230,0.30);
   color: var(--accent);
-  box-shadow: 0 1px 2px rgba(58,100,230,.12);
-  width: auto;
-  padding: 0 10px 0 8px;
+  border-color: transparent;
+  box-shadow: none;
+  z-index: 1;
 }
-.layer-tabs .tab-icon { display: inline-flex; }
-.layer-tabs .tab-icon .ic { width: 14px; height: 14px; }
-.layer-tabs .tab-label {
-  font-weight: 600;
-  display: none;
+/* Slim accent indicator flush with the bottom edge of the active tab */
+.layer-tabs .layer-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
 }
-.layer-tabs .layer-tab.active .tab-label { display: inline; }
+.layer-tabs .tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.layer-tabs .tab-icon .ic { width: 16px; height: 16px; }
+/* Labels are hidden -- icons are enough; full names show in the tooltip */
+.layer-tabs .tab-label,
+.layer-tabs .layer-tab.active .tab-label { display: none; }
+/* Floating accent badge in the top-right corner of the icon \u2014 small,
+   crisp, with a white halo so it never reads as overlapping the icon. */
+.layer-tabs .tab-icon { position: relative; }
 .layer-tabs .tab-count {
   position: absolute;
   top: -4px;
-  right: -4px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
   background: var(--accent);
+  color: #ffffff;
   border: 1.5px solid #ffffff;
   border-radius: var(--r-pill);
-  padding: 0 4px;
   font-size: 9px;
-  min-width: 14px;
-  height: 14px;
-  line-height: 11px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: #ffffff;
   font-weight: 700;
-  pointer-events: none;
-  box-shadow: 0 1px 2px rgba(15,23,42,.10);
-}
-.layer-tabs .layer-tab.active .tab-count {
-  position: static;
-  border: none;
-  background: var(--accent);
-  color: #ffffff;
-  height: 16px;
   line-height: 1;
-  padding: 3px 7px;
-  font-size: 10px;
-  margin-left: 4px;
-  box-shadow: none;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.10);
+  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
+  z-index: 2;
 }
-
+.layer-tabs .layer-tab { gap: 0; }
+.layer-tabs .layer-tab:hover .tab-count { transform: translateY(-1px); }
+.layer-tabs .layer-tab.active .tab-count {
+  background: var(--accent);
+  border-color: #ffffff;
+}
 .layer-list {
   list-style: none;
   padding: 8px 10px 12px;
@@ -794,7 +804,7 @@ aside.properties[hidden] { display: none; }
 .ctx-menu {
   position: fixed;
   z-index: 9999;
-  min-width: 200px;
+  width: 240px;
   padding: 6px;
   background: var(--panel);
   border: 1px solid var(--border-strong);
@@ -900,6 +910,11 @@ aside.properties[hidden] { display: none; }
 .ctx-swatches .swatch.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.45));
 }
 
 /* Inline rename input — replaces the Rename menu row in place */

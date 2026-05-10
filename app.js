@@ -40,7 +40,7 @@
   ];
   const STROKE_SWATCHES = [
     '#cbd5e1', '#94a3b8', '#7da3e8', '#7ec295', '#e88b9f',
-    '#a48de0', '#c8a05a', '#b6c0cf', '#a3b8d8', '#d4b896',
+    '#a48de0', '#c8a05a', '#1f3a8a', '#a3b8d8', '#d4b896',
   ];
 
   // ---------- Helpers ----------
@@ -349,7 +349,7 @@
     } else if (o.type === 'wall') {
       const a = worldToScreen(o.x1, o.y1);
       const b = worldToScreen(o.x2, o.y2);
-      ctx.strokeStyle = o.stroke || '#1f2937';
+      ctx.strokeStyle = o.stroke || '#4a2e1c';
       ctx.lineWidth = (o.thickness || state.defaultWallThickness) * s;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     } else if (o.type === 'door') {
@@ -711,7 +711,7 @@
     if (state.tool === 'room') {
       obj = makeObject('room', { x: sw.x, y: sw.y, w: 0, h: 0, label: '' });
     } else if (state.tool === 'wall') {
-      obj = makeObject('wall', { x1: sw.x, y1: sw.y, x2: sw.x, y2: sw.y, thickness: state.defaultWallThickness, stroke: '#1f2937' });
+      obj = makeObject('wall', { x1: sw.x, y1: sw.y, x2: sw.x, y2: sw.y, thickness: state.defaultWallThickness, stroke: '#4a2e1c' });
     } else if (state.tool === 'door') {
       obj = makeObject('door', { x: sw.x, y: sw.y, w: 0.9, rot: 0 });
       state.objects.push(obj);
@@ -897,7 +897,7 @@
   // Returns the array of new wall objects.
   function addWallsForRoom(room) {
     const t = state.defaultWallThickness;
-    const stroke = '#1f2937';
+    const stroke = '#4a2e1c';
     const x1 = room.x, y1 = room.y;
     const x2 = room.x + room.w, y2 = room.y + room.h;
     const sides = [
@@ -1009,7 +1009,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'swatch' + (hex.toLowerCase() === target ? ' active' : '');
-      b.style.background = hex;
+      b.style.backgroundColor = hex;
       b.title = hex;
       b.addEventListener('click', () => { hideContextMenu(); onPick(hex); });
       wrap.appendChild(b);
@@ -1383,7 +1383,7 @@
       }));
     }
     if (supportsStroke) {
-      frag.appendChild(ctxSection('Stroke'));
+      frag.appendChild(ctxSection('Border'));
       frag.appendChild(ctxSwatchRow(STROKE_SWATCHES, o.stroke, (hex) => {
         pushHistory();
         o.stroke = hex;
@@ -1748,10 +1748,34 @@
       if (btn) btn.click();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       deleteSelected();
+    } else if (e.key === 'F2') {
+      e.preventDefault();
+      renameSelected();
     } else if (e.key === '+' || e.key === '=') { zoomBy(1.2); }
     else if (e.key === '-') { zoomBy(1 / 1.2); }
     else if (e.key === '0') { resetView(); }
   });
+
+  // Start inline rename on the selected object via the Layers panel.
+  // Switches to the object's layer category tab if needed so the row exists,
+  // then triggers the same rename UI used by double-click.
+  function renameSelected() {
+    if (state.selectedId == null) { flash('Select an object first'); return; }
+    const o = state.objects.find(x => x.id === state.selectedId);
+    if (!o) return;
+    if (o.type === 'measure') { flash('Measurements have no name'); return; }
+    // Switch to the matching tab so the row gets rendered
+    if (activeLayerTab !== o.type) {
+      activeLayerTab = o.type;
+      refreshLayers();
+    }
+    // Find the row and trigger its double-click rename
+    const li = document.querySelector(`#layer-list li.layer-item[data-id="${o.id}"]`);
+    if (!li) return;
+    const nameSpan = li.querySelector('.layer-name');
+    if (!nameSpan) return;
+    startInlineRename(li, nameSpan, o);
+  }
 
   function deleteSelected() {
     if (state.selectedId == null) return;
@@ -2459,17 +2483,76 @@
   if (last) {
     try { deserialize(last); } catch { /* ignore */ }
   } else {
-    // Seed with a sample plot so the canvas isn't blank on first load
-    state.objects = [
-      makeObject('room', { x: 0, y: 0, w: 12, h: 8, label: 'Plot Boundary', fill: '#fff8e6', stroke: '#a0741b', strokeWidth: 3 }),
-      makeObject('room', { x: 1, y: 1, w: 5, h: 4, label: 'Living Room', fill: '#e8f0ff', stroke: '#1f3a8a' }),
-      makeObject('room', { x: 6.2, y: 1, w: 4.8, h: 3, label: 'Kitchen', fill: '#e7f7ec', stroke: '#1f7a3a' }),
-      makeObject('room', { x: 1, y: 5.2, w: 4, h: 2.8, label: 'Bedroom', fill: '#fce6f0', stroke: '#9a1f6a' }),
-      makeObject('door', { x: 3, y: 5, w: 0.9, rot: 0 }),
-    ];
+    seedSampleLayout();
     refreshAll();
   }
   // Treat the freshly initialized state as "saved" so the Save button starts disabled.
   lastSavedSnapshot = serialize();
   updateSaveButton();
+
+  // Polished default plot \u2014 a small 2-bedroom apartment using only the
+  // palette colors. Demonstrates rooms, walls, doors, windows, text and a
+  // measurement so the canvas isn't empty on first run.
+  function seedSampleLayout() {
+    state.projectName = 'Sample Apartment';
+    const pn = document.getElementById('project-name');
+    if (pn) pn.value = state.projectName;
+
+    // All measurements in meters (~33ft x 23ft plot)
+    const T = 0.15;            // wall thickness
+    const W = 10, H = 7;       // plot interior
+
+    const roomFill = {
+      living:  '#e8f0ff', // sky tint
+      kitchen: '#e7f7ec', // mint
+      dining:  '#f3e9d2', // sand
+      bed1:    '#fde9ef', // blush
+      bed2:    '#efe8ff', // lilac
+      bath:    '#e0f2fe', // pale sky
+    };
+    const stroke = '#94a3b8';
+    const wallStroke = '#4a2e1c';
+
+    state.objects = [
+      // \u2014\u2014 Floor / zones \u2014\u2014
+      makeObject('room', { x: 0,    y: 0,    w: 5.5, h: 4.2, label: 'Living Room', fill: roomFill.living,  stroke, strokeWidth: 2 }),
+      makeObject('room', { x: 5.5,  y: 0,    w: 4.5, h: 2.5, label: 'Kitchen',     fill: roomFill.kitchen, stroke, strokeWidth: 2 }),
+      makeObject('room', { x: 5.5,  y: 2.5,  w: 4.5, h: 1.7, label: 'Dining',      fill: roomFill.dining,  stroke, strokeWidth: 2 }),
+      makeObject('room', { x: 0,    y: 4.2,  w: 4,   h: 2.8, label: 'Bedroom 1',   fill: roomFill.bed1,    stroke, strokeWidth: 2 }),
+      makeObject('room', { x: 4,    y: 4.2,  w: 3.5, h: 2.8, label: 'Bedroom 2',   fill: roomFill.bed2,    stroke, strokeWidth: 2 }),
+      makeObject('room', { x: 7.5,  y: 4.2,  w: 2.5, h: 2.8, label: 'Bathroom',    fill: roomFill.bath,    stroke, strokeWidth: 2 }),
+
+      // \u2014\u2014 Outer walls (form the building shell) \u2014\u2014
+      makeObject('wall', { x1: 0, y1: 0, x2: W, y2: 0, thickness: T, stroke: wallStroke }), // top
+      makeObject('wall', { x1: W, y1: 0, x2: W, y2: H, thickness: T, stroke: wallStroke }), // right
+      makeObject('wall', { x1: W, y1: H, x2: 0, y2: H, thickness: T, stroke: wallStroke }), // bottom
+      makeObject('wall', { x1: 0, y1: H, x2: 0, y2: 0, thickness: T, stroke: wallStroke }), // left
+
+      // \u2014\u2014 Interior walls \u2014\u2014
+      makeObject('wall', { x1: 5.5, y1: 0,   x2: 5.5, y2: 4.2, thickness: T, stroke: wallStroke }), // living | kitchen/dining
+      makeObject('wall', { x1: 5.5, y1: 2.5, x2: W,   y2: 2.5, thickness: T, stroke: wallStroke }), // kitchen | dining
+      makeObject('wall', { x1: 0,   y1: 4.2, x2: W,   y2: 4.2, thickness: T, stroke: wallStroke }), // common | bedrooms
+      makeObject('wall', { x1: 4,   y1: 4.2, x2: 4,   y2: H,   thickness: T, stroke: wallStroke }), // bed1 | bed2
+      makeObject('wall', { x1: 7.5, y1: 4.2, x2: 7.5, y2: H,   thickness: T, stroke: wallStroke }), // bed2 | bath
+
+      // \u2014\u2014 Doors (rot in degrees, w in metres) \u2014\u2014
+      makeObject('door', { x: 1.4, y: 4.2, w: 0.9, rot: 0   }), // bedroom 1 entry
+      makeObject('door', { x: 5.0, y: 4.2, w: 0.9, rot: 0   }), // bedroom 2 entry
+      makeObject('door', { x: 8.4, y: 4.2, w: 0.8, rot: 0   }), // bathroom entry
+      makeObject('door', { x: 5.5, y: 1.0, w: 0.9, rot: 90  }), // living -> kitchen
+      makeObject('door', { x: 3.0, y: 0,   w: 1.0, rot: 0   }), // front entrance
+
+      // \u2014\u2014 Windows \u2014\u2014
+      makeObject('window', { x: 0.8, y: 0,   w: 1.6, rot: 0  }), // living window (front)
+      makeObject('window', { x: 7.0, y: 0,   w: 1.4, rot: 0  }), // kitchen window
+      makeObject('window', { x: 0,   y: 5.4, w: 1.4, rot: 90 }), // bedroom 1 (left wall)
+      makeObject('window', { x: W,   y: 5.4, w: 1.4, rot: 90 }), // bathroom (right wall)
+
+      // \u2014\u2014 Text labels \u2014\u2014
+      makeObject('text', { x: 3.05, y: 0.45, text: 'Front Entrance', size: 12, fill: '#475569' }),
+
+      // \u2014\u2014 Measurement (overall width) \u2014\u2014
+      makeObject('measure', { x1: 0, y1: -0.55, x2: W, y2: -0.55 }),
+    ];
+  }
 })();
