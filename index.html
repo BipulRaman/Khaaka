@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plotly — Layout Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ======================== Inline icon library ======================== -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-logo" viewBox="0 0 24 24"><path d="M3 5a2 2 0 0 1 2-2h7l9 9-9 9-9-9V5z" fill="currentColor"/><circle cx="8.5" cy="8.5" r="1.6" fill="#fff"/></symbol>
+
+      <!-- Tools -->
+      <symbol id="i-cursor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6-2.4 6L5 3z"/></symbol>
+      <symbol id="i-room"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.2"/></symbol>
+      <symbol id="i-wall"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 19L20 5"/></symbol>
+      <symbol id="i-door"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19h14"/><path d="M5 19V8"/><path d="M5 8a14 14 0 0 1 14 11"/></symbol>
+      <symbol id="i-window" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M12 6v12M4 12h16"/></symbol>
+      <symbol id="i-text"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M12 6v13M9 19h6"/></symbol>
+      <symbol id="i-ruler"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14.5L14.5 3 21 9.5 9.5 21 3 14.5z"/><path d="M6 13l1.5 1.5M9 10l2 2M12 7l1.5 1.5M15 10l1.5 1.5M12 13l2 2"/></symbol>
+
+      <!-- Editing -->
+      <symbol id="i-undo"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h9a7 7 0 1 1 0 14h-3"/></symbol>
+      <symbol id="i-redo"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9h-9a7 7 0 1 0 0 14h3"/></symbol>
+      <symbol id="i-copy"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+      <symbol id="i-paste"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2"/><path d="M9 12h6M9 16h4"/></symbol>
+      <symbol id="i-dup"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="12" height="12" rx="2"/><rect x="8" y="8" width="12" height="12" rx="2"/></symbol>
+      <symbol id="i-trash"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v7M14 11v7"/></symbol>
+
+      <!-- View -->
+      <symbol id="i-zoom-in"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M11 8v6M8 11h6M20 20l-4.3-4.3"/></symbol>
+      <symbol id="i-zoom-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M8 11h6M20 20l-4.3-4.3"/></symbol>
+      <symbol id="i-frame"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M4 16v3a1 1 0 0 0 1 1h3M20 8V5a1 1 0 0 0-1-1h-3M20 16v3a1 1 0 0 1-1 1h-3"/></symbol>
+
+      <!-- Topbar -->
+      <symbol id="i-plus"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-save"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 0 1 2-2h10l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></symbol>
+      <symbol id="i-load"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 4v12M7 11l5 5 5-5"/></symbol>
+      <symbol id="i-export"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 16V4M7 9l5-5 5 5"/></symbol>
+      <symbol id="i-import"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 4v12M7 11l5 5 5-5"/></symbol>
+      <symbol id="i-image"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M3 17l5-4 5 4 3-2 5 4"/></symbol>
+      <symbol id="i-json"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H6a2 2 0 0 0-2 2v3M9 20H6a2 2 0 0 1-2-2v-3M15 4h3a2 2 0 0 1 2 2v3M15 20h3a2 2 0 0 0 2-2v-3"/></symbol>
+
+      <!-- Layers categories -->
+      <symbol id="i-cat-all"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-cat-room"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.2"/></symbol>
+      <symbol id="i-cat-wall"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 19L20 5"/></symbol>
+      <symbol id="i-cat-door"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19h14M5 19V8M5 8a14 14 0 0 1 14 11"/></symbol>
+      <symbol id="i-cat-window"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M12 6v12M4 12h16"/></symbol>
+      <symbol id="i-cat-text"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M12 6v13M9 19h6"/></symbol>
+      <symbol id="i-cat-measure" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M5 9v6M19 9v6"/></symbol>
+
+      <!-- Layer row -->
+      <symbol id="i-grip"   viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></symbol>
+      <symbol id="i-lock"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 1 1 8 0v3"/></symbol>
+      <symbol id="i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></symbol>
+      <symbol id="i-x"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- ============================== TOPBAR ============================== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"><svg class="ic"><use href="#i-logo"/></svg></span>
+      <span class="brand-name">Plotly</span>
+      <small class="brand-tag">Layout Studio</small>
+    </div>
+    <div class="project-name" title="Project name (used for exports)">
+      <input id="project-name" type="text" maxlength="80" placeholder="Untitled Layout" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="topbar-actions">
+      <button class="ghost" id="btn-new" title="New (Ctrl+N)">
+        <svg class="ic"><use href="#i-plus"/></svg><span>New</span>
+      </button>
+      <span class="sep"></span>
+      <button class="ghost" id="btn-load" title="Load from browser">
+        <svg class="ic"><use href="#i-load"/></svg><span>Load</span>
+      </button>
+      <label class="ghost file-btn" title="Import JSON">
+        <svg class="ic"><use href="#i-import"/></svg><span>Import</span>
+        <input type="file" id="file-import" accept="application/json" hidden />
+      </label>
+      <button class="ghost" id="btn-export-json" title="Download as JSON">
+        <svg class="ic"><use href="#i-json"/></svg><span>Export</span>
+      </button>
+      <button class="ghost" id="btn-export-png" title="Download as PNG">
+        <svg class="ic"><use href="#i-image"/></svg><span>PNG</span>
+      </button>
+      <span class="sep"></span>
+      <button class="primary" id="btn-save" title="Save to browser (Ctrl+S)">
+        <svg class="ic"><use href="#i-save"/></svg><span>Save</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- ============================== TOOLBAR ============================== -->
+    <aside class="toolbar" aria-label="Tools">
+      <div class="tool-group">
+        <button class="tool active" data-tool="select" title="Select / Move (V)">
+          <svg class="ic"><use href="#i-cursor"/></svg>
+        </button>
+      </div>
+      <div class="tool-divider"></div>
+      <div class="tool-group">
+        <button class="tool" data-tool="room"   title="Room (R)"><svg class="ic"><use href="#i-room"/></svg></button>
+        <button class="tool" data-tool="wall"   title="Wall (W)"><svg class="ic"><use href="#i-wall"/></svg></button>
+        <button class="tool" data-tool="door"   title="Door (D)"><svg class="ic"><use href="#i-door"/></svg></button>
+        <button class="tool" data-tool="window" title="Window (N)"><svg class="ic"><use href="#i-window"/></svg></button>
+      </div>
+      <div class="tool-divider"></div>
+      <div class="tool-group">
+        <button class="tool" data-tool="text"    title="Text (T)"><svg class="ic"><use href="#i-text"/></svg></button>
+        <button class="tool" data-tool="measure" title="Measure (M)"><svg class="ic"><use href="#i-ruler"/></svg></button>
+      </div>
+      <div class="tool-divider"></div>
+      <div class="tool-group">
+        <button id="btn-undo"      title="Undo (Ctrl+Z)"><svg class="ic"><use href="#i-undo"/></svg></button>
+        <button id="btn-redo"      title="Redo (Ctrl+Y)"><svg class="ic"><use href="#i-redo"/></svg></button>
+        <button id="btn-copy"      title="Copy (Ctrl+C)"><svg class="ic"><use href="#i-copy"/></svg></button>
+        <button id="btn-paste"     title="Paste (Ctrl+V)"><svg class="ic"><use href="#i-paste"/></svg></button>
+        <button id="btn-duplicate" title="Duplicate (Ctrl+D)"><svg class="ic"><use href="#i-dup"/></svg></button>
+        <button id="btn-delete"    title="Delete (Del)" class="danger"><svg class="ic"><use href="#i-trash"/></svg></button>
+      </div>
+      <div class="tool-spacer"></div>
+      <div class="tool-group">
+        <button id="btn-zoom-in"    title="Zoom In (+)"><svg class="ic"><use href="#i-zoom-in"/></svg></button>
+        <button id="btn-zoom-out"   title="Zoom Out (−)"><svg class="ic"><use href="#i-zoom-out"/></svg></button>
+        <button id="btn-zoom-reset" title="Reset View (0)"><svg class="ic"><use href="#i-frame"/></svg></button>
+      </div>
+    </aside>
+
+    <!-- ============================== CANVAS ============================== -->
+    <section class="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div class="hint" id="hint" hidden>Pick a tool and start drawing. Wheel to zoom, middle-drag to pan. Right-click switches to Select / Move.</div>
+      <div class="toast" id="toast" hidden></div>
+      <div class="status" id="status">x: 0 &nbsp;|&nbsp; y: 0 &nbsp;|&nbsp; zoom: 100%</div>
+    </section>
+
+    <!-- ========================= PROPERTIES PANEL ========================= -->
+    <aside class="properties" id="properties">
+      <div class="properties-scroll">
+
+        <section class="card collapsible" data-card="properties">
+          <button class="card-head" type="button" aria-expanded="true">
+            <span class="card-title">Properties</span>
+            <span class="card-toggle" aria-hidden="true"></span>
+          </button>
+          <div class="card-body">
+            <div id="props-empty" class="empty-state">
+              <svg class="empty-ic"><use href="#i-cursor"/></svg>
+              <p>Select an object to edit its properties.</p>
+            </div>
+            <div id="props-form" hidden>
+              <label>Name / Label
+                <input type="text" id="prop-label" placeholder="Untitled" />
+              </label>
+              <div class="grid2">
+                <label><span data-axis="x">X (m)</span><input type="text" id="prop-x" /></label>
+                <label><span data-axis="y">Y (m)</span><input type="text" id="prop-y" /></label>
+                <label><span data-axis="w">Width (m)</span><input type="text" id="prop-w" /></label>
+                <label><span data-axis="h">Height (m)</span><input type="text" id="prop-h" /></label>
+              </div>
+              <div class="grid3">
+                <label>Fill   <input type="color" id="prop-fill"   value="#e8f0ff" /></label>
+                <label>Stroke <input type="color" id="prop-stroke" value="#1f3a8a" /></label>
+                <label>Width  <input type="number" id="prop-strokew" min="1" max="20" value="2" /></label>
+              </div>
+              <label id="prop-thickness-row" hidden>Wall thickness
+                <input type="text" id="prop-thickness" />
+              </label>
+              <div id="prop-opening-row" hidden class="grid2">
+                <label><span id="prop-opening-w-label">Opening width</span>
+                  <input type="text" id="prop-opening-w" />
+                </label>
+                <label>Rotation (°)
+                  <input type="number" id="prop-rotation" step="1" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card collapsible" data-card="canvas">
+          <button class="card-head" type="button" aria-expanded="true">
+            <span class="card-title">Canvas</span>
+            <span class="card-toggle" aria-hidden="true"></span>
+          </button>
+          <div class="card-body">
+            <label>Units
+              <select id="opt-units">
+                <option value="m">Meters (m / cm)</option>
+                <option value="ft" selected>Feet & Inches (ft' in")</option>
+              </select>
+            </label>
+            <div class="toggle-stack">
+              <label class="row"><input type="checkbox" id="opt-grid" checked /><span>Show grid</span></label>
+              <label class="row"><input type="checkbox" id="opt-snap" checked /><span>Snap to grid</span></label>
+              <label class="row"><input type="checkbox" id="opt-dims" checked /><span>Show dimensions</span></label>
+            </div>
+            <div class="grid2">
+              <label><span id="opt-grid-size-label">Box size</span>
+                <select id="opt-grid-size"></select>
+              </label>
+              <label>Render scale
+                <select id="opt-box-px">
+                  <option value="25">25 px</option>
+                  <option value="50" selected>50 px</option>
+                  <option value="75">75 px</option>
+                  <option value="100">100 px</option>
+                  <option value="150">150 px</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="card collapsible layers-section" id="layers-card" data-card="layers">
+          <button class="card-head" type="button" aria-expanded="true">
+            <span class="card-title">Layers</span>
+            <span class="card-toggle" aria-hidden="true"></span>
+          </button>
+          <div class="card-body layers-body">
+            <div id="layer-tabs" class="layer-tabs" role="tablist"></div>
+            <ul id="layer-list" class="layer-list"></ul>
+          </div>
+        </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
