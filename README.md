@@ -14,9 +14,9 @@ A **premium, dependency-free in-browser 2D layout editor** for plots, floor plan
 - **Six object types**: rooms, walls (with thickness), doors (with swing arc), windows, text labels, and dimension/measurement lines.
 - **Properties panel** with color, stroke, size, rotation, and unit-aware position/dimension fields.
 - **Layers panel** with category tabs, lock, hide, reorder, and rename.
-- **Autosave** to `localStorage` (debounced) plus an explicit Save / Load.
+- **Autosave** to `localStorage` (debounced) plus an explicit Save button. The last saved layout is auto-loaded on page open.
 - **Exports**: pretty-printed **JSON** (round-trips losslessly) and high-DPI **PNG**.
-- **Undo / Redo** (100 steps), **Copy / Cut / Paste / Duplicate** with cascading offsets.
+- **Undo / Redo** (100 steps).
 - **Full keyboard shortcuts** for every tool and editing action.
 - **Premium UI** in light theme — Inter + JetBrains Mono, custom inline SVG icon set, no external icon font.
 
@@ -72,10 +72,6 @@ Right-click on the canvas to switch back to **Select / Move** at any time.
 | Redo         | `Ctrl` + `Y`         |
 | Save         | `Ctrl` + `S`         |
 | New          | `Ctrl` + `N`         |
-| Copy         | `Ctrl` + `C`         |
-| Cut          | `Ctrl` + `X`         |
-| Paste        | `Ctrl` + `V`         |
-| Duplicate    | `Ctrl` + `D`         |
 | Delete       | `Delete` / `Backspace` |
 
 ### View
@@ -113,7 +109,7 @@ Internally, all geometry is stored in **meters**, so files round-trip cleanly re
 ## Saving, loading, and exporting
 
 - **Save** — writes the current layout to `localStorage` under the key `plotly.layout.v1`.
-- **Load** — restores the most recent saved layout.
+- **Auto-load** — the last saved layout is restored automatically when you open the page.
 - **Autosave** — every change is debounced and written to `localStorage` automatically.
 - **Import** — load a previously exported `.json` file.
 - **Export** — downloads a pretty-printed `.json` (project state) or high-DPI `.png` (clean render, no selection halo). Filenames use the project name plus a local timestamp:

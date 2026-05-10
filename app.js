@@ -1,4 +1,4 @@
-/* Plotly — a tiny, dependency-free 2D layout-map editor.
+/* Khaaka — a tiny, dependency-free 2D layout-map editor.
    Coordinate system: world units = meters. Rendering scales by `pxPerMeter` * zoom. */
 
 (() => {
@@ -12,7 +12,7 @@
     nextId: 1,
     view: { x: 0, y: 0, zoom: 1 }, // pan in screen px, zoom multiplier
     pxPerMeter: 40,
-    pxPerBox: 50,        // screen pixels per grid box (drives pxPerMeter)
+    pxPerBox: 25,        // screen pixels per grid box (drives pxPerMeter)
     grid: { show: true, snap: true, size: 0.3048 }, // 1 ft default
     showDims: true,
     units: 'ft', // 'm' = meters, 'ft' = feet & inches
@@ -31,26 +31,17 @@
   const ctx = canvas.getContext('2d');
   const hint = document.getElementById('hint');
   const status = document.getElementById('status');
-  const propsEmpty = document.getElementById('props-empty');
-  const propsForm = document.getElementById('props-form');
   const layerList = document.getElementById('layer-list');
 
-  const propEls = {
-    label: document.getElementById('prop-label'),
-    x: document.getElementById('prop-x'),
-    y: document.getElementById('prop-y'),
-    w: document.getElementById('prop-w'),
-    h: document.getElementById('prop-h'),
-    fill: document.getElementById('prop-fill'),
-    stroke: document.getElementById('prop-stroke'),
-    strokew: document.getElementById('prop-strokew'),
-    thickness: document.getElementById('prop-thickness'),
-    openingW: document.getElementById('prop-opening-w'),
-    rotation: document.getElementById('prop-rotation'),
-  };
-  const propThicknessRow = document.getElementById('prop-thickness-row');
-  const propOpeningRow = document.getElementById('prop-opening-row');
-  const propOpeningWLabel = document.getElementById('prop-opening-w-label');
+  // ---------- Limited color palettes (light shades only) ----------
+  const FILL_SWATCHES = [
+    '#ffffff', '#fff8e6', '#fde9ef', '#fce5d8', '#f3e9d2',
+    '#e7f7ec', '#e0f2fe', '#e8f0ff', '#efe8ff', '#eef1f6',
+  ];
+  const STROKE_SWATCHES = [
+    '#cbd5e1', '#94a3b8', '#7da3e8', '#7ec295', '#e88b9f',
+    '#a48de0', '#c8a05a', '#b6c0cf', '#a3b8d8', '#d4b896',
+  ];
 
   // ---------- Helpers ----------
   const uid = () => state.nextId++;
@@ -426,7 +417,9 @@
       const dx = o.x2 - o.x1, dy = o.y2 - o.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       const t = (o.thickness || state.defaultWallThickness) * s;
-      drawDimension(o.x1, o.y1, o.x2, o.y2, fmtLen(len), false, t / 2 + 12);
+      // dimSide: 0 = default side, 1 = flipped to the other side of the wall
+      const sign = (o.dimSide === 1 || o.dimSide === -1) ? -1 : 1;
+      o._dimLabel = drawDimension(o.x1, o.y1, o.x2, o.y2, fmtLen(len), false, (t / 2 + 12) * sign);
     } else if (o.type === 'door' || o.type === 'window') {
       // Cycle through 4 label positions around the door's right angle:
       //   0: parallel to opening, side A (default)
@@ -594,20 +587,26 @@
     return null;
   }
 
-  // Hit-test door/window dimension labels (rendered in the dimensions pass).
-  // Returns the matched object, or null. `sx`,`sy` are screen-space px relative
-  // to the canvas top-left (matches how the dim label rect was stored).
+  // Hit-test wall / door / window dimension labels (rendered in the
+  // dimensions pass). Returns the matched object, or null. `sx`,`sy` are
+  // screen-space px relative to the canvas top-left.
   function hitDimensionLabel(sx, sy) {
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
-      if (o.type !== 'door' && o.type !== 'window') continue;
+      if (o.type !== 'door' && o.type !== 'window' && o.type !== 'wall') continue;
       const r = o._dimLabel;
       if (!r) continue;
-      // Convert click into the rect's local rotated frame.
+      // Primary: rotated AABB hit test in the pill's local frame.
       const cos = Math.cos(-r.angle), sin = Math.sin(-r.angle);
       const lx = (sx - r.cx) * cos - (sy - r.cy) * sin;
       const ly = (sx - r.cx) * sin + (sy - r.cy) * cos;
       if (Math.abs(lx) <= r.halfW && Math.abs(ly) <= r.halfH) return o;
+      // Fallback: forgiving radius around the label center (covers any
+      // small rotation rounding errors and gives users a slightly larger
+      // tap target).
+      const radius = Math.max(r.halfW, r.halfH) + 4;
+      const dx = sx - r.cx, dy = sy - r.cy;
+      if (dx * dx + dy * dy <= radius * radius) return o;
     }
     return null;
   }
@@ -655,13 +654,21 @@
       return;
     }
 
-    // Click on a door/window dimension label cycles it around the right angle.
-    // Only intercept when the Select tool is active so other drawing tools work normally.
+    // Click on a dimension label:
+    //  - wall → flip label to the other side of the wall
+    //  - door / window → cycle the label around the right angle (4 positions)
+    // Only intercept when the Select tool is active so other drawing tools
+    // work normally. Allowed even on locked objects (cosmetic, not geometry).
     if (state.showDims && state.tool === 'select') {
       const dimHit = hitDimensionLabel(sx, sy);
-      if (dimHit && !dimHit.locked) {
+      if (dimHit) {
         pushHistory();
-        dimHit.dimSide = (doorDimSide(dimHit) + 1) % 4;
+        if (dimHit.type === 'wall') {
+          // Flip side: 0 ↔ 1 (legacy -1/+1 also collapse to this)
+          dimHit.dimSide = (dimHit.dimSide === 1 || dimHit.dimSide === -1) ? 0 : 1;
+        } else {
+          dimHit.dimSide = (doorDimSide(dimHit) + 1) % 4;
+        }
         state.selectedId = dimHit.id;
         refreshAll();
         return;
@@ -710,6 +717,7 @@
       state.objects.push(obj);
       state.selectedId = obj.id;
       drag = null;
+      switchToSelectTool();
       refreshAll();
       return;
     } else if (state.tool === 'window') {
@@ -717,17 +725,31 @@
       state.objects.push(obj);
       state.selectedId = obj.id;
       drag = null;
+      switchToSelectTool();
       refreshAll();
       return;
     } else if (state.tool === 'text') {
-      const txt = prompt('Enter text:', 'Label');
-      if (txt) {
-        obj = makeObject('text', { x: sw.x, y: sw.y, text: txt, size: 14, fill: '#111827' });
-        state.objects.push(obj);
-        state.selectedId = obj.id;
-      }
+      // Capture the placement coords now (sw is per-event); the modal is async.
+      const placeAt = { x: sw.x, y: sw.y };
       drag = null;
+      switchToSelectTool();
       refreshAll();
+      showModal({
+        kind: 'prompt',
+        title: 'Add text',
+        message: 'Enter the text to place on the canvas.',
+        defaultValue: 'Label',
+        placeholder: 'Label',
+        okText: 'Add',
+      }).then(txt => {
+        if (txt == null) return;
+        const trimmed = String(txt).trim();
+        if (!trimmed) return;
+        const o = makeObject('text', { x: placeAt.x, y: placeAt.y, text: trimmed, size: 14, fill: '#111827' });
+        state.objects.push(o);
+        state.selectedId = o.id;
+        refreshAll();
+      });
       return;
     } else if (state.tool === 'measure') {
       // Never snap measurements to grid
@@ -752,6 +774,12 @@
     const sw = { x: snap(w.x), y: snap(w.y) };
 
     if (!drag) {
+      // Idle hover: show pointer cursor over clickable dimension labels.
+      if (state.showDims && state.tool === 'select' && hitDimensionLabel(sx, sy)) {
+        canvas.style.cursor = 'pointer';
+      } else if (canvas.style.cursor === 'pointer') {
+        canvas.style.cursor = 'default';
+      }
       return;
     }
 
@@ -845,6 +873,10 @@
             Math.hypot(o.x2 - o.x1, o.y2 - o.y1) < 0.1)) {
         state.objects.pop();
         state.selectedId = null;
+      } else {
+        // Successful create — auto-switch back to Select / Move so the next
+        // click doesn't accidentally start another shape.
+        switchToSelectTool();
       }
     }
     drag = null;
@@ -852,7 +884,594 @@
     refreshAll();
   });
 
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Programmatically activate the Select tool (also updates toolbar state).
+  function switchToSelectTool() {
+    if (state.tool === 'select') return;
+    const btn = document.querySelector('.tool[data-tool="select"]');
+    if (btn) btn.click();
+    else state.tool = 'select';
+  }
+
+  // Create 4 wall objects along a room's edges (top, right, bottom, left).
+  // Walls are appended after the room so they render on top of the fill.
+  // Returns the array of new wall objects.
+  function addWallsForRoom(room) {
+    const t = state.defaultWallThickness;
+    const stroke = '#1f2937';
+    const x1 = room.x, y1 = room.y;
+    const x2 = room.x + room.w, y2 = room.y + room.h;
+    const sides = [
+      { x1, y1,     x2,     y2: y1 }, // top
+      { x1: x2, y1, x2,     y2 },     // right
+      { x1, y1: y2, x2,     y2 },     // bottom
+      { x1, y1,     x2: x1, y2 },     // left
+    ];
+    const created = [];
+    for (const s of sides) {
+      const w = makeObject('wall', { ...s, thickness: t, stroke });
+      state.objects.push(w);
+      created.push(w);
+    }
+    return created;
+  }
+
+  // ---------- Right-click context menu ----------
+  const ctxMenu = document.getElementById('context-menu');
+
+  function hideContextMenu() {
+    if (!ctxMenu) return;
+    ctxMenu.hidden = true;
+    ctxMenu.setAttribute('aria-hidden', 'true');
+    ctxMenu.innerHTML = '';
+  }
+
+  function ctxItem(label, onClick, opts = {}) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ctx-item' + (opts.danger ? ' danger' : '');
+    b.disabled = !!opts.disabled;
+    b.innerHTML =
+      `<span>${label}</span>` +
+      (opts.shortcut ? `<span class="ctx-shortcut">${opts.shortcut}</span>` : '');
+    b.addEventListener('click', () => {
+      if (b.disabled) return;
+      hideContextMenu();
+      onClick();
+    });
+    return b;
+  }
+
+  // Compact horizontal icon-button row for the context menu (e.g. Undo / Redo
+  // / Delete at the top). Each item:
+  //   { iconId, title, shortcut?, onClick, disabled, danger }
+  function ctxIconRow(items) {
+    const row = document.createElement('div');
+    row.className = 'ctx-icon-row';
+    items.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctx-icon-btn' + (it.danger ? ' danger' : '');
+      b.disabled = !!it.disabled;
+      b.title = it.title || '';
+      b.setAttribute('aria-label', it.title || '');
+      b.innerHTML =
+        `<svg class="ic"><use href="#${it.iconId}"/></svg>` +
+        (it.shortcut ? `<span class="ctx-icon-kbd">${it.shortcut}</span>` : '');
+      b.addEventListener('click', () => {
+        if (b.disabled) return;
+        hideContextMenu();
+        it.onClick();
+      });
+      row.appendChild(b);
+    });
+    return row;
+  }
+  function ctxSep() {
+    const d = document.createElement('div');
+    d.className = 'ctx-sep';
+    return d;
+  }
+  function ctxSection(text) {
+    const d = document.createElement('div');
+    d.className = 'ctx-section';
+    d.textContent = text;
+    return d;
+  }
+  // Toggle row — shows a check on the left when active. Closes the menu and
+  // dispatches `change` on the linked sidebar input so the existing handler
+  // fires (autosave, redraw, state sync).
+  function ctxToggle(label, isOn, inputId) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ctx-item ctx-toggle' + (isOn ? ' on' : '');
+    b.setAttribute('role', 'menuitemcheckbox');
+    b.setAttribute('aria-checked', String(!!isOn));
+    b.innerHTML =
+      `<span class="ctx-check" aria-hidden="true"></span>` +
+      `<span class="ctx-toggle-label">${label}</span>`;
+    b.addEventListener('click', () => {
+      hideContextMenu();
+      const chk = document.getElementById(inputId);
+      if (chk) { chk.checked = !chk.checked; chk.dispatchEvent(new Event('change')); }
+    });
+    return b;
+  }
+  function ctxDisplayToggles(frag) {
+    frag.appendChild(ctxToggle('Show grid', state.grid.show, 'opt-grid'));
+    frag.appendChild(ctxToggle('Snap to grid', state.grid.snap, 'opt-snap'));
+    frag.appendChild(ctxToggle('Show dimensions', state.showDims, 'opt-dims'));
+  }
+  function ctxSwatchRow(palette, currentHex, onPick) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctx-swatches';
+    const target = (currentHex || '').toLowerCase();
+    palette.forEach(hex => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'swatch' + (hex.toLowerCase() === target ? ' active' : '');
+      b.style.background = hex;
+      b.title = hex;
+      b.addEventListener('click', () => { hideContextMenu(); onPick(hex); });
+      wrap.appendChild(b);
+    });
+    return wrap;
+  }
+
+  // Inline numeric stepper used inside the context menu (e.g. Outline width).
+  // Stays open while clicking +/-; the value updates live and `onChange`
+  // receives the clamped new value.
+  function ctxStepper(getValue, onChange, opts = {}) {
+    const min = opts.min ?? 1;
+    const max = opts.max ?? 20;
+    const step = opts.step ?? 1;
+    const wrap = document.createElement('div');
+    wrap.className = 'ctx-stepper';
+    const dec = document.createElement('button');
+    dec.type = 'button';
+    dec.className = 'ctx-step-btn';
+    dec.textContent = '\u2212'; // minus sign
+    const val = document.createElement('span');
+    val.className = 'ctx-step-value';
+    const inc = document.createElement('button');
+    inc.type = 'button';
+    inc.className = 'ctx-step-btn';
+    inc.textContent = '+';
+    const sync = () => {
+      const v = getValue();
+      val.textContent = String(v);
+      dec.disabled = v <= min;
+      inc.disabled = v >= max;
+    };
+    const bump = (delta) => (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = getValue();
+      const next = Math.max(min, Math.min(max, cur + delta));
+      if (next === cur) return;
+      onChange(next);
+      sync();
+    };
+    dec.addEventListener('click', bump(-step));
+    inc.addEventListener('click', bump(+step));
+    sync();
+    wrap.appendChild(dec);
+    wrap.appendChild(val);
+    wrap.appendChild(inc);
+    return wrap;
+  }
+
+  // Compact compound length editor for the right-click menu. Looks like
+  // `[Width  ][ 12 ft  3 in ]` on a single row. Updates `o` live as the
+  // user types and calls `onCommit(meters)` for each change. Min major 0.
+  function ctxLenInput(label, getMeters, onCommit) {
+    const row = document.createElement('div');
+    row.className = 'ctx-section-row ctx-len-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'ctx-section ctx-inline-section';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    const isFt = state.units === 'ft';
+    const wrap = document.createElement('div');
+    wrap.className = 'len-input ctx-len-input';
+    const major = document.createElement('input');
+    major.type = 'number';
+    major.className = 'len-major';
+    major.min = '0';
+    major.step = '1';
+    const uMaj = document.createElement('span');
+    uMaj.className = 'len-major-unit';
+    uMaj.textContent = isFt ? 'ft' : 'm';
+    const minor = document.createElement('input');
+    minor.type = 'number';
+    minor.className = 'len-minor';
+    minor.min = '0';
+    minor.step = '0.5';
+    const uMin = document.createElement('span');
+    uMin.className = 'len-minor-unit';
+    uMin.textContent = isFt ? 'in' : 'cm';
+    wrap.append(major, uMaj, minor, uMin);
+    row.appendChild(wrap);
+
+    const sizeOf = (input) => {
+      const len = (input.value || '').length;
+      input.size = Math.max(1, Math.min(6, len || 1));
+    };
+
+    // Initial decompose
+    const writeFromMeters = (m) => {
+      if (m == null || isNaN(m)) { major.value = ''; minor.value = ''; }
+      else if (isFt) {
+        const totalIn = (m / M_PER_FT) * 12;
+        const halfIn = Math.round(totalIn * 2) / 2;
+        let ft = Math.trunc(halfIn / 12);
+        let inches = halfIn - ft * 12;
+        if (inches < 0) { inches += 12; ft -= 1; }
+        if (inches >= 12) { ft += 1; inches -= 12; }
+        major.value = String(ft);
+        minor.value = (inches % 1 === 0) ? String(inches) : inches.toFixed(1);
+      } else {
+        const totalCm = Math.round(m * 1000) / 10;
+        let mm = Math.trunc(totalCm / 100);
+        let cm = Math.round((totalCm - mm * 100) * 10) / 10;
+        if (cm < 0) { cm += 100; mm -= 1; }
+        if (cm >= 100) { mm += 1; cm -= 100; }
+        major.value = String(mm);
+        minor.value = (cm % 1 === 0) ? String(cm) : cm.toFixed(1);
+      }
+      sizeOf(major); sizeOf(minor);
+    };
+    writeFromMeters(getMeters());
+
+    const onInput = () => {
+      sizeOf(major); sizeOf(minor);
+      const a = parseFloat(major.value);
+      const b = parseFloat(minor.value);
+      const aOk = !isNaN(a), bOk = !isNaN(b);
+      if (!aOk && !bOk) return;
+      let meters;
+      if (isFt) meters = ftToM((aOk ? a : 0) + (bOk ? b : 0) / 12);
+      else meters = (aOk ? a : 0) + (bOk ? b : 0) / 100;
+      if (meters > 0) onCommit(meters);
+    };
+    major.addEventListener('input', onInput);
+    minor.addEventListener('input', onInput);
+    // Don't let Esc inside the input close the whole menu while editing
+    [major, minor].forEach(i => i.addEventListener('keydown', (e) => e.stopPropagation()));
+    // Keep the menu open while clicking inside the input
+    wrap.addEventListener('mousedown', (e) => e.stopPropagation());
+    return row;
+  }
+
+  // Angle preset row for doors / windows — `[Angle ][ 0° 90° 180° 270° ]`.
+  // The button matching the current angle is highlighted; click sets `o.rot`.
+  function ctxAnglePresets(o) {
+    const row = document.createElement('div');
+    row.className = 'ctx-section-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'ctx-section ctx-inline-section';
+    lbl.textContent = 'Angle';
+    row.appendChild(lbl);
+
+    const group = document.createElement('div');
+    group.className = 'ctx-presets';
+    const cur = ((o.rot || 0) % 360 + 360) % 360;
+    [0, 90, 180, 270].forEach(a => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctx-preset' + (Math.round(cur) === a ? ' active' : '');
+      b.textContent = `${a}\u00b0`;
+      b.disabled = !!o.locked;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (o.locked) return;
+        pushHistory();
+        o.rot = a;
+        // Live-update active highlight without rebuilding the whole menu
+        group.querySelectorAll('.ctx-preset').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        draw();
+        refreshLayers();
+        scheduleAutosave();
+      });
+      group.appendChild(b);
+    });
+    row.appendChild(group);
+    return row;
+  }
+
+  // Flip row — single button that mirrors the door/window swing direction
+  // (re-uses the existing `flipOpening`, same effect as double-clicking).
+  function ctxFlipRow(o) {
+    const row = document.createElement('div');
+    row.className = 'ctx-section-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'ctx-section ctx-inline-section';
+    lbl.textContent = 'Flip';
+    row.appendChild(lbl);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ctx-preset';
+    btn.textContent = 'Mirror swing';
+    btn.disabled = !!o.locked;
+    btn.title = 'Mirror the opening so the swing arc reverses';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (o.locked) return;
+      pushHistory();
+      flipOpening(o);
+      draw();
+      refreshLayers();
+      scheduleAutosave();
+    });
+    const group = document.createElement('div');
+    group.className = 'ctx-presets';
+    group.appendChild(btn);
+    row.appendChild(group);
+    return row;
+  }
+
+  // Rename menu row that swaps itself into an inline <input> on click.
+  // Enter / blur commits, Escape cancels. The menu stays open while editing.
+  // Allowed even when the object is locked (lock blocks geometry, not labels).
+  function buildRenameItem(o) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ctx-item';
+    btn.innerHTML = `<span>Rename</span><span class="ctx-shortcut">F2</span>`;
+
+    const startEdit = () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'ctx-rename-input';
+      input.value = o.label || o.text || '';
+      input.placeholder = 'Name…';
+      input.maxLength = 80;
+      btn.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        const next = input.value.trim();
+        const prev = o.label || (o.type === 'text' ? o.text : '') || '';
+        if (next !== prev) {
+          pushHistory();
+          o.label = next;
+          if (o.type === 'text') o.text = next;
+          refreshAll();
+          scheduleAutosave();
+        }
+        hideContextMenu();
+      };
+      const cancel = () => {
+        if (done) return;
+        done = true;
+        hideContextMenu();
+      };
+      input.addEventListener('keydown', (ev) => {
+        ev.stopPropagation();
+        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+      });
+      input.addEventListener('blur', commit);
+      // Stop clicks inside the input from bubbling to the outside-click handler
+      input.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    };
+
+    btn.addEventListener('click', startEdit);
+    return btn;
+  }
+
+  function buildObjectMenu(o) {
+    const frag = document.createDocumentFragment();
+    const idx = state.objects.indexOf(o);
+    const isFront = idx === state.objects.length - 1;
+    const isBack = idx === 0;
+    const supportsFill = o.type === 'room' || o.type === 'window' || o.type === 'text';
+    const supportsStroke = o.type !== 'text';
+    const supportsOutline = o.type === 'room' || o.type === 'wall';
+
+    // Quick-action icon row: Undo / Redo / Delete
+    frag.appendChild(ctxIconRow([
+      { iconId: 'i-undo',  title: 'Undo (Ctrl+Z)', shortcut: 'Undo',   onClick: undo, disabled: state.history.length === 0 },
+      { iconId: 'i-redo',  title: 'Redo (Ctrl+Y)', shortcut: 'Redo',   onClick: redo, disabled: state.future.length === 0 },
+      { iconId: 'i-trash', title: 'Delete (Del)',  shortcut: 'Delete', danger: true,  disabled: !!o.locked,
+        onClick: () => { state.selectedId = o.id; deleteSelected(); } },
+    ]));
+    frag.appendChild(ctxSep());
+
+    frag.appendChild(buildRenameItem(o));
+
+    frag.appendChild(ctxSep());
+
+    frag.appendChild(ctxItem(o.locked ? 'Unlock' : 'Lock', () => {
+      pushHistory();
+      o.locked = !o.locked;
+      refreshAll();
+      scheduleAutosave();
+    }));
+    frag.appendChild(ctxItem('Bring to front', () => {
+      if (isFront) return;
+      pushHistory();
+      state.objects.splice(idx, 1);
+      state.objects.push(o);
+      refreshAll();
+      scheduleAutosave();
+    }, { disabled: isFront }));
+    frag.appendChild(ctxItem('Send to back', () => {
+      if (isBack) return;
+      pushHistory();
+      state.objects.splice(idx, 1);
+      state.objects.unshift(o);
+      refreshAll();
+      scheduleAutosave();
+    }, { disabled: isBack }));
+
+    // Room-specific: add 4 walls along the room's edges as separate,
+    // individually-editable wall objects.
+    if (o.type === 'room') {
+      frag.appendChild(ctxItem('Add walls', () => {
+        pushHistory();
+        const walls = addWallsForRoom(o);
+        flash(`Added ${walls.length} walls`);
+        refreshAll();
+        scheduleAutosave();
+      }, { disabled: !!o.locked }));
+    }
+
+    // Inline length editors (Width / Height / Thickness) — only for the
+    // types where these dimensions are directly editable.
+    const dimRows = [];
+    const commitBound = (key) => (m) => {
+      if (o.locked) return;
+      pushHistory();
+      const b = getBounds(o);
+      setBounds(o, { ...b, [key]: m });
+      draw();
+      refreshLayers();
+      scheduleAutosave();
+    };
+    if (o.type === 'room') {
+      dimRows.push(ctxLenInput('Width',  () => o.w, commitBound('w')));
+      dimRows.push(ctxLenInput('Height', () => o.h, commitBound('h')));
+    } else if (o.type === 'door' || o.type === 'window') {
+      dimRows.push(ctxLenInput('Width', () => o.w, (m) => {
+        if (o.locked) return;
+        pushHistory();
+        o.w = Math.max(0.3, m);
+        draw();
+        refreshLayers();
+        scheduleAutosave();
+      }));
+      // Quick angle presets — 0° / 90° / 180° / 270°
+      dimRows.push(ctxAnglePresets(o));
+      // Flip the swing direction (mirror about the opening's end-point).
+      // Same effect as double-clicking the door/window.
+      dimRows.push(ctxFlipRow(o));
+    } else if (o.type === 'wall') {
+      dimRows.push(ctxLenInput('Thickness',
+        () => o.thickness || state.defaultWallThickness,
+        (m) => {
+          if (o.locked) return;
+          pushHistory();
+          o.thickness = Math.max(0.01, m);
+          state.defaultWallThickness = o.thickness;
+          draw();
+          refreshLayers();
+          scheduleAutosave();
+        }
+      ));
+    }
+    if (dimRows.length) {
+      frag.appendChild(ctxSep());
+      dimRows.forEach(r => frag.appendChild(r));
+    }
+
+    if (supportsFill || supportsStroke) frag.appendChild(ctxSep());
+
+    if (supportsFill) {
+      frag.appendChild(ctxSection('Fill'));
+      frag.appendChild(ctxSwatchRow(FILL_SWATCHES, o.fill, (hex) => {
+        pushHistory();
+        o.fill = hex;
+        refreshAll();
+        scheduleAutosave();
+      }));
+    }
+    if (supportsStroke) {
+      frag.appendChild(ctxSection('Stroke'));
+      frag.appendChild(ctxSwatchRow(STROKE_SWATCHES, o.stroke, (hex) => {
+        pushHistory();
+        o.stroke = hex;
+        refreshAll();
+        scheduleAutosave();
+      }));
+    }
+    if (supportsOutline) {
+      const row = document.createElement('div');
+      row.className = 'ctx-section-row';
+      const label = document.createElement('span');
+      label.className = 'ctx-section ctx-inline-section';
+      label.textContent = 'Border Thickness';
+      row.appendChild(label);
+      row.appendChild(ctxStepper(
+        () => o.strokeWidth || 2,
+        (v) => {
+          pushHistory();
+          o.strokeWidth = v;
+          draw();
+          refreshLayers();
+          scheduleAutosave();
+        },
+        { min: 1, max: 20, step: 1 }
+      ));
+      frag.appendChild(row);
+    }
+
+    return frag;
+  }
+
+  function buildEmptyMenu() {
+    const frag = document.createDocumentFragment();
+    // Quick-action icon row: Undo / Redo
+    frag.appendChild(ctxIconRow([
+      { iconId: 'i-undo', title: 'Undo (Ctrl+Z)', shortcut: 'Undo', onClick: undo, disabled: state.history.length === 0 },
+      { iconId: 'i-redo', title: 'Redo (Ctrl+Y)', shortcut: 'Redo', onClick: redo, disabled: state.future.length === 0 },
+    ]));
+    frag.appendChild(ctxSep());
+    frag.appendChild(ctxItem('Reset view', resetView, { shortcut: '0' }));
+    frag.appendChild(ctxItem('Zoom in', () => zoomBy(1.2), { shortcut: '+' }));
+    frag.appendChild(ctxItem('Zoom out', () => zoomBy(1 / 1.2), { shortcut: '-' }));
+    frag.appendChild(ctxSep());
+    frag.appendChild(ctxSection('Display'));
+    ctxDisplayToggles(frag);
+    return frag;
+  }
+
+  function showContextMenu(clientX, clientY, content) {
+    if (!ctxMenu) return;
+    ctxMenu.innerHTML = '';
+    ctxMenu.appendChild(content);
+    ctxMenu.hidden = false;
+    ctxMenu.setAttribute('aria-hidden', 'false');
+    // Position, then clamp to viewport on next frame once dimensions are known
+    ctxMenu.style.left = `${clientX}px`;
+    ctxMenu.style.top = `${clientY}px`;
+    requestAnimationFrame(() => {
+      const r = ctxMenu.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      let nx = clientX, ny = clientY;
+      if (r.right > vw - 6) nx = Math.max(6, vw - r.width - 6);
+      if (r.bottom > vh - 6) ny = Math.max(6, vh - r.height - 6);
+      ctxMenu.style.left = `${nx}px`;
+      ctxMenu.style.top = `${ny}px`;
+    });
+  }
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    const w = screenToWorld(sx, sy);
+    const hit = hitTest(w.x, w.y);
+    const content = hit ? buildObjectMenu(hit) : buildEmptyMenu();
+    showContextMenu(e.clientX, e.clientY, content);
+  });
+
+  // Dismiss on outside interaction
+  document.addEventListener('mousedown', (e) => {
+    if (ctxMenu.hidden) return;
+    if (!ctxMenu.contains(e.target)) hideContextMenu();
+  }, true);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !ctxMenu.hidden) hideContextMenu();
+  });
+  window.addEventListener('blur', hideContextMenu);
+  canvas.addEventListener('wheel', hideContextMenu, { passive: true });
 
   // Double-click on a door/window flips its direction (mirrors the opening
   // about its current end-point). Visually it stays in the same span but the
@@ -915,17 +1534,62 @@
 
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-redo').addEventListener('click', redo);
-  document.getElementById('btn-copy').addEventListener('click', copySelected);
-  document.getElementById('btn-paste').addEventListener('click', pasteClipboard);
-  document.getElementById('btn-duplicate').addEventListener('click', duplicateSelected);
   document.getElementById('btn-delete').addEventListener('click', deleteSelected);
 
   document.getElementById('btn-zoom-in').addEventListener('click', () => zoomBy(1.2));
   document.getElementById('btn-zoom-out').addEventListener('click', () => zoomBy(1 / 1.2));
   document.getElementById('btn-zoom-reset').addEventListener('click', resetView);
 
-  document.getElementById('btn-new').addEventListener('click', () => {
-    if (!confirm('Start a new layout? Unsaved changes will be lost.')) return;
+  // Generic dropdown wiring shared by Settings / Export / etc.
+  // Toggles `panel.hidden`, mirrors `.open` on the wrapper, syncs aria,
+  // and closes on outside click or Esc. Items inside the panel that have
+  // `[data-close-on-click]` (set by default for `.dropdown-item`) close
+  // the panel automatically when clicked.
+  function bindDropdown(wrapId, btnId, panelId) {
+    const wrap = document.getElementById(wrapId);
+    const btn = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (!wrap || !btn || !panel) return;
+    const close = () => {
+      panel.hidden = true;
+      wrap.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+    };
+    const open = () => {
+      panel.hidden = false;
+      wrap.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+    };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.hidden ? open() : close();
+    });
+    panel.addEventListener('click', (e) => {
+      const item = e.target.closest('.dropdown-item');
+      if (item) close();
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (panel.hidden) return;
+      if (!wrap.contains(e.target)) close();
+    }, true);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) close();
+    });
+  }
+
+  bindDropdown('settings-dropdown', 'btn-settings', 'settings-panel');
+  bindDropdown('export-dropdown', 'btn-export', 'export-panel');
+
+  document.getElementById('btn-new').addEventListener('click', async () => {
+    const ok = await showModal({
+      kind: 'confirm',
+      title: 'Start a new layout?',
+      message: 'This will clear the current canvas. Unsaved changes will be lost.',
+      okText: 'New layout',
+      cancelText: 'Keep editing',
+      danger: true,
+    });
+    if (!ok) return;
     state.objects = [];
     state.selectedId = null;
     state.history = [];
@@ -966,12 +1630,6 @@
       flash('Save failed');
     }
   });
-  document.getElementById('btn-load').addEventListener('click', () => {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return flash('No saved layout');
-    deserialize(data);
-    flash('Loaded');
-  });
   document.getElementById('btn-export-json').addEventListener('click', () => {
     download(exportFilename('json'), serialize(), 'application/json');
   });
@@ -988,6 +1646,11 @@
   // Canvas option inputs
   document.getElementById('opt-units').addEventListener('change', (e) => {
     state.units = e.target.value === 'ft' ? 'ft' : 'm';
+    // Reset to the canonical default box size for the chosen unit system
+    // (1' for feet/inches, 25 cm for meters) instead of converting the
+    // previous value to the nearest option.
+    state.grid.size = state.units === 'ft' ? ftToM(1) : 0.25;
+    applyPxPerBox();
     refreshUnitLabels();
     refreshAll();
   });
@@ -1013,71 +1676,10 @@
     }
   });
 
-  // Property inputs
-  Object.entries(propEls).forEach(([key, el]) => {
-    el.addEventListener('input', () => {
-      const o = state.objects.find(x => x.id === state.selectedId);
-      if (!o) return;
-      const b = getBounds(o);
-      switch (key) {
-        case 'label': o.label = el.value; if (o.type === 'text') o.text = el.value; break;
-        case 'x': { const v = parseLen(el.value); if (v != null) setBounds(o, { ...b, x: v }); break; }
-        case 'y': { const v = parseLen(el.value); if (v != null) setBounds(o, { ...b, y: v }); break; }
-        case 'w': { const v = parseLen(el.value); if (v != null && v > 0) setBounds(o, { ...b, w: v }); break; }
-        case 'h': { const v = parseLen(el.value); if (v != null && v > 0) setBounds(o, { ...b, h: v }); break; }
-        case 'fill': o.fill = el.value; break;
-        case 'stroke': o.stroke = el.value; break;
-        case 'strokew': o.strokeWidth = parseFloat(el.value) || 1; break;
-        case 'thickness': {
-          if (o.type !== 'wall') break;
-          const v = parseLen(el.value);
-          if (v != null && v > 0) {
-            o.thickness = v;
-            // Remember as default for next new wall
-            state.defaultWallThickness = v;
-          }
-          break;
-        }
-        case 'openingW': {
-          if (o.type !== 'door' && o.type !== 'window') break;
-          const v = parseLen(el.value);
-          if (v != null && v > 0) o.w = v;
-          break;
-        }
-        case 'rotation': {
-          if (o.type !== 'door' && o.type !== 'window') break;
-          const v = parseFloat(el.value);
-          if (!isNaN(v)) o.rot = v;
-          break;
-        }
-      }
-      draw();
-      refreshLayers();
-      scheduleAutosave();
-    });
-  });
-
-  // Commit thickness on blur with formatted value
-  propEls.thickness.addEventListener('blur', () => {
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (o && o.type === 'wall') propEls.thickness.value = fmtLenInput(o.thickness || state.defaultWallThickness);
-  });
-
   function refreshUnitLabels() {
-    const u = state.units === 'ft' ? 'ft\'in"' : 'm';
-    document.querySelectorAll('[data-axis]').forEach(span => {
-      const a = span.dataset.axis;
-      const names = { x: 'X', y: 'Y', w: 'Width', h: 'Height' };
-      span.textContent = `${names[a]} (${u})`;
-    });
     document.getElementById('opt-grid-size-label').textContent =
-      state.units === 'ft' ? 'Box size (ft per grid)' : 'Box size (m per grid)';
+      state.units === 'ft' ? 'Box size (ft)' : 'Box size (m)';
     populateGridSizeOptions();
-    // Refresh selected wall's thickness display in current units
-    const sel = state.objects.find(x => x.id === state.selectedId);
-    if (sel && sel.type === 'wall' && propEls.thickness) {
-      propEls.thickness.value = fmtLenInput(sel.thickness || state.defaultWallThickness);
-    }
   }
 
   // Build the Box-size dropdown options based on current units, and select
@@ -1138,10 +1740,6 @@
       if (k === 'y') { e.preventDefault(); redo(); return; }
       if (k === 's') { e.preventDefault(); document.getElementById('btn-save').click(); return; }
       if (k === 'n') { e.preventDefault(); document.getElementById('btn-new').click(); return; }
-      if (k === 'c') { e.preventDefault(); copySelected(); return; }
-      if (k === 'x') { e.preventDefault(); cutSelected(); return; }
-      if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
-      if (k === 'd') { e.preventDefault(); duplicateSelected(); return; }
     }
     const map = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
     if (map[e.key.toLowerCase()]) {
@@ -1166,85 +1764,6 @@
     refreshAll();
   }
 
-  // ---------- Clipboard (in-memory) ----------
-  let clipboard = null;        // deep-cloned object (without id)
-  let pasteCount = 0;          // for cascading paste offsets
-
-  function copySelected() {
-    if (state.selectedId == null) return;
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (!o) return;
-    clipboard = JSON.parse(JSON.stringify(o));
-    delete clipboard.id;
-    delete clipboard.locked; // pasted copies start unlocked
-    delete clipboard._dimLabel;
-    pasteCount = 0;
-    flash('Copied');
-  }
-
-  function cutSelected() {
-    if (state.selectedId == null) return;
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (!o) return;
-    if (o.locked) { flash('Object is locked'); return; }
-    clipboard = JSON.parse(JSON.stringify(o));
-    delete clipboard.id;
-    delete clipboard.locked;
-    delete clipboard._dimLabel;
-    pasteCount = 0;
-    pushHistory();
-    state.objects = state.objects.filter(x => x.id !== o.id);
-    state.selectedId = null;
-    refreshAll();
-    flash('Cut');
-  }
-
-  function pasteClipboard() {
-    if (!clipboard) { flash('Clipboard is empty'); return; }
-    pushHistory();
-    pasteCount += 1;
-    // Offset by one grid box per paste so the copy doesn't sit exactly on top
-    const off = state.grid.size * pasteCount;
-    const copy = JSON.parse(JSON.stringify(clipboard));
-    copy.id = uid();
-    offsetObject(copy, off, off);
-    state.objects.push(copy);
-    state.selectedId = copy.id;
-    refreshAll();
-  }
-
-  function duplicateSelected() {
-    if (state.selectedId == null) return;
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (!o) return;
-    pushHistory();
-    const copy = JSON.parse(JSON.stringify(o));
-    copy.id = uid();
-    delete copy.locked;
-    const off = state.grid.size; // one grid box offset
-    offsetObject(copy, off, off);
-    state.objects.push(copy);
-    state.selectedId = copy.id;
-    refreshAll();
-  }
-
-  function offsetObject(o, dx, dy) {
-    switch (o.type) {
-      case 'room':
-      case 'door':
-      case 'window':
-      case 'text':
-        o.x = (o.x || 0) + dx;
-        o.y = (o.y || 0) + dy;
-        break;
-      case 'wall':
-      case 'measure':
-        o.x1 += dx; o.y1 += dy;
-        o.x2 += dx; o.y2 += dy;
-        break;
-    }
-  }
-
   function zoomBy(f) {
     const r = canvas.getBoundingClientRect();
     const sx = r.width / 2, sy = r.height / 2;
@@ -1263,49 +1782,11 @@
   }
 
   // ---------- Properties / Layers ----------
-  function refreshProps() {
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (!o) {
-      propsEmpty.hidden = false;
-      propsForm.hidden = true;
-      return;
-    }
-    propsEmpty.hidden = true;
-    propsForm.hidden = false;
-    const b = getBounds(o);
-    propEls.label.value = o.label || o.text || '';
-    propEls.x.value = fmtLenInput(b.x);
-    propEls.y.value = fmtLenInput(b.y);
-    propEls.w.value = fmtLenInput(b.w);
-    propEls.h.value = fmtLenInput(b.h);
-    // W/H rows are only meaningful for rooms; hide for everything else since
-    // other types are sized via dedicated fields (length via endpoints,
-    // door/window via Opening width).
-    const showWH = (o.type === 'room');
-    propEls.w.parentElement.style.display = showWH ? '' : 'none';
-    propEls.h.parentElement.style.display = showWH ? '' : 'none';
-    propEls.fill.value = toHex(o.fill || '#e8f0ff');
-    propEls.stroke.value = toHex(o.stroke || '#1f3a8a');
-    propEls.strokew.value = o.strokeWidth || 2;
-    if (o.type === 'wall') {
-      propThicknessRow.hidden = false;
-      propEls.thickness.value = fmtLenInput(o.thickness || state.defaultWallThickness);
-    } else {
-      propThicknessRow.hidden = true;
-    }
-    if (o.type === 'door' || o.type === 'window') {
-      propOpeningRow.hidden = false;
-      propOpeningWLabel.textContent =
-        (o.type === 'door' ? 'Door width' : 'Window width') +
-        (state.units === 'ft' ? " (ft'in\")" : ' (m)');
-      propEls.openingW.value = fmtLenInput(o.w);
-      propEls.rotation.value = Math.round((o.rot || 0) * 10) / 10;
-    } else {
-      propOpeningRow.hidden = true;
-    }
-    // Disable all property inputs when the object is locked
-    Object.values(propEls).forEach(el => { if (el) el.disabled = !!o.locked; });
-  }
+  // The Properties panel was removed - all editing flows through the
+  // right-click context menu, the Layers panel, and direct canvas
+  // manipulation. `refreshProps` is kept as a no-op so existing call
+  // sites (mouse/keyboard handlers, undo/redo, etc.) do not change.
+  function refreshProps() {}
 
   // Layer category metadata + active tab
   const LAYER_CATEGORIES = [
@@ -1326,6 +1807,15 @@
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
       if (buckets.has(o.type)) buckets.get(o.type).push(o);
+    }
+
+    // Hide the entire Layers card when the layout has no objects at all.
+    const layersCard = document.getElementById('layers-card');
+    if (layersCard) layersCard.hidden = state.objects.length === 0;
+    if (state.objects.length === 0) {
+      if (layerTabs) layerTabs.innerHTML = '';
+      if (layerList) layerList.innerHTML = '';
+      return;
     }
 
     // ---- Tabs ----
@@ -1524,9 +2014,19 @@
   function refreshAll() {
     refreshProps();
     refreshLayers();
+    refreshSidePanel();
     draw();
     scheduleAutosave();
     updateSaveButton();
+  }
+
+  // Hide the entire right-side panel when there are no objects (Layers card
+  // is empty). Properties card was removed; only Layers lives here now.
+  function refreshSidePanel() {
+    const aside = document.querySelector('aside.properties');
+    const layersCard = document.getElementById('layers-card');
+    if (!aside) return;
+    aside.hidden = !(layersCard && !layersCard.hidden);
   }
 
   // ---------- Autosave (debounced) ----------
@@ -1599,6 +2099,7 @@
       units: state.units,
       defaultWallThickness: state.defaultWallThickness,
       projectName: state.projectName,
+      view: { x: state.view.x, y: state.view.y, zoom: state.view.zoom },
       objects: state.objects,
       nextId: state.nextId,
     }, null, 2);
@@ -1609,12 +2110,19 @@
       pushHistory();
       suppressAutosave = true;
       state.pxPerMeter = d.pxPerMeter || 40;
-      state.pxPerBox = d.pxPerBox || 50;
+      state.pxPerBox = d.pxPerBox || 25;
       state.grid = d.grid || state.grid;
       state.showDims = d.showDims !== undefined ? d.showDims : true;
       state.units = d.units === 'ft' ? 'ft' : 'm';
       if (typeof d.defaultWallThickness === 'number') state.defaultWallThickness = d.defaultWallThickness;
       if (typeof d.projectName === 'string' && d.projectName.trim()) state.projectName = d.projectName;
+      if (d.view && typeof d.view.zoom === 'number') {
+        state.view = {
+          x: typeof d.view.x === 'number' ? d.view.x : state.view.x,
+          y: typeof d.view.y === 'number' ? d.view.y : state.view.y,
+          zoom: Math.max(0.1, Math.min(8, d.view.zoom)),
+        };
+      }
       state.objects = d.objects || [];
       state.nextId = d.nextId || (Math.max(0, ...state.objects.map(o => o.id)) + 1);
       state.selectedId = null;
@@ -1632,7 +2140,11 @@
       return true;
     } catch (err) {
       suppressAutosave = false;
-      alert('Could not load layout: ' + err.message);
+      showModal({
+        kind: 'alert',
+        title: 'Could not load layout',
+        message: err.message,
+      });
       return false;
     }
   }
@@ -1696,6 +2208,81 @@
     }, 1600);
   }
 
+  // ---------- Modal dialog (custom alert / confirm / prompt) ----------
+  // Returns a Promise resolving to:
+  //   - alert:   true / false  (always true once dismissed; hitting Esc/cancel returns false)
+  //   - confirm: true / false  (true on OK, false on Cancel/Esc)
+  //   - prompt:  string / null (null on Cancel/Esc, string on OK)
+  // opts: { title, message, kind: 'alert'|'confirm'|'prompt', okText, cancelText,
+  //         danger, defaultValue, placeholder }
+  function showModal(opts = {}) {
+    const backdrop = document.getElementById('modal-backdrop');
+    const titleEl = document.getElementById('modal-title');
+    const msgEl   = document.getElementById('modal-message');
+    const inputEl = document.getElementById('modal-input');
+    const okBtn   = document.getElementById('modal-ok');
+    const cancelBtn = document.getElementById('modal-cancel');
+    if (!backdrop) return Promise.resolve(false);
+
+    const kind = opts.kind || 'alert';
+    titleEl.textContent = opts.title || '';
+    msgEl.textContent = opts.message || '';
+    okBtn.textContent = opts.okText || (kind === 'alert' ? 'OK' : (kind === 'confirm' ? 'Confirm' : 'OK'));
+    cancelBtn.textContent = opts.cancelText || 'Cancel';
+    cancelBtn.hidden = (kind === 'alert');
+    okBtn.classList.toggle('danger', !!opts.danger);
+
+    if (kind === 'prompt') {
+      inputEl.hidden = false;
+      inputEl.value = opts.defaultValue ?? '';
+      inputEl.placeholder = opts.placeholder || '';
+    } else {
+      inputEl.hidden = true;
+      inputEl.value = '';
+    }
+
+    backdrop.hidden = false;
+    backdrop.setAttribute('aria-hidden', 'false');
+
+    return new Promise(resolve => {
+      const close = (result) => {
+        backdrop.hidden = true;
+        backdrop.setAttribute('aria-hidden', 'true');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        backdrop.removeEventListener('mousedown', onBackdrop);
+        document.removeEventListener('keydown', onKey, true);
+        resolve(result);
+      };
+      const onOk = () => {
+        if (kind === 'prompt') close(inputEl.value);
+        else if (kind === 'confirm') close(true);
+        else close(true);
+      };
+      const onCancel = () => {
+        if (kind === 'prompt') close(null);
+        else close(false);
+      };
+      const onBackdrop = (e) => { if (e.target === backdrop) onCancel(); };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
+        else if (e.key === 'Enter' && document.activeElement !== cancelBtn) {
+          // Allow Enter to confirm; in a prompt this also captures input value
+          e.preventDefault(); e.stopPropagation(); onOk();
+        }
+      };
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      backdrop.addEventListener('mousedown', onBackdrop);
+      document.addEventListener('keydown', onKey, true);
+      // Focus management
+      setTimeout(() => {
+        if (kind === 'prompt') { inputEl.focus(); inputEl.select(); }
+        else okBtn.focus();
+      }, 0);
+    });
+  }
+
   // Collapsible side-panel cards (Properties / Canvas / Layers).
   // Persists per-card collapsed state in localStorage.
   const COLLAPSE_KEY = 'plotly.cards.collapsed.v1';
@@ -1730,8 +2317,139 @@
     });
   }
 
+  // ---------- Custom tooltip controller ----------
+  // Hijacks any element's `title` attribute and shows it as a polished
+  // floating tooltip instead of the native browser one. The native title
+  // is removed on hover (kept in `data-tip-cache` so it can be restored).
+  // Anything with `data-tip="..."` works too \u2014 useful for elements where
+  // the native title would interfere (e.g. screen reader labels).
+  (() => {
+    const tip = document.getElementById('tooltip');
+    if (!tip) return;
+    let target = null;
+    let showTimer = null;
+    const SHOW_DELAY = 280;   // ms before showing
+    const SAFETY = 6;         // viewport edge padding
+    const GAP = 8;            // distance from target
+
+    const getTipText = (el) => {
+      if (!el) return '';
+      const cached = el.getAttribute('data-tip') || el.getAttribute('data-tip-cache');
+      if (cached) return cached;
+      const t = el.getAttribute('title');
+      if (!t) return '';
+      // Move title into our cache so the browser doesn't show its own.
+      el.setAttribute('data-tip-cache', t);
+      el.removeAttribute('title');
+      return t;
+    };
+
+    // Render the text \u2014 promotes "(Ctrl+S)" / "(Del)" suffixes into a kbd chip.
+    const renderText = (text) => {
+      const m = text.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+      if (!m) { tip.textContent = text; return; }
+      tip.textContent = '';
+      tip.append(m[1].trim());
+      const k = document.createElement('kbd');
+      k.textContent = m[2].trim();
+      tip.appendChild(k);
+    };
+
+    const place = (el) => {
+      const r = el.getBoundingClientRect();
+      // Default: above. Flip below if not enough room above.
+      tip.removeAttribute('hidden');
+      // Force layout so we can measure
+      tip.style.left = '0px';
+      tip.style.top = '0px';
+      const tr = tip.getBoundingClientRect();
+      let dir = 'above';
+      let top = r.top - tr.height - GAP;
+      if (top < SAFETY) {
+        dir = 'below';
+        top = r.bottom + GAP;
+      }
+      let left = r.left + r.width / 2 - tr.width / 2;
+      // Clamp horizontally
+      if (left < SAFETY) left = SAFETY;
+      else if (left + tr.width > window.innerWidth - SAFETY) left = window.innerWidth - tr.width - SAFETY;
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.top  = `${Math.round(top)}px`;
+      tip.setAttribute('data-dir', dir);
+      // Position the arrow: keep it pointing at target's center
+      const arrowX = (r.left + r.width / 2) - left;
+      tip.style.setProperty('--tip-arrow-x', `${arrowX}px`);
+      // Hide arrow if target is off-screen / too narrow to point cleanly
+      tip.classList.toggle('no-arrow', r.width < 12 || r.height < 12);
+    };
+
+    const show = (el) => {
+      const text = getTipText(el);
+      if (!text) return;
+      renderText(text);
+      tip.hidden = false;
+      tip.setAttribute('aria-hidden', 'false');
+      place(el);
+      // Trigger the entrance transition on the next frame
+      requestAnimationFrame(() => tip.classList.add('show'));
+      target = el;
+    };
+
+    const hide = () => {
+      clearTimeout(showTimer);
+      showTimer = null;
+      tip.classList.remove('show');
+      // Wait for fade-out before fully hiding
+      setTimeout(() => {
+        if (!tip.classList.contains('show')) {
+          tip.hidden = true;
+          tip.setAttribute('aria-hidden', 'true');
+        }
+      }, 120);
+      target = null;
+    };
+
+    const findTarget = (el) => {
+      while (el && el !== document.body) {
+        if (el.nodeType === 1 && (el.hasAttribute('title') || el.hasAttribute('data-tip') || el.hasAttribute('data-tip-cache'))) {
+          // Skip elements with empty tip text
+          const text = el.getAttribute('data-tip') || el.getAttribute('data-tip-cache') || el.getAttribute('title');
+          if (text && text.trim()) return el;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    };
+
+    document.addEventListener('mouseover', (e) => {
+      const el = findTarget(e.target);
+      if (!el || el === target) return;
+      // Cancel any pending show
+      clearTimeout(showTimer);
+      // If a tooltip is already showing, swap immediately
+      if (target) hide();
+      showTimer = setTimeout(() => show(el), SHOW_DELAY);
+    });
+    document.addEventListener('mouseout', (e) => {
+      const to = e.relatedTarget;
+      if (to && (tip.contains(to) || (target && target.contains(to)))) return;
+      hide();
+    });
+    // Hide on user interactions that should reset hover state
+    document.addEventListener('mousedown', hide, true);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+    window.addEventListener('blur', hide);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+  })();
+
   // ---------- Init ----------
   window.addEventListener('resize', resizeCanvas);
+  // Redraw the canvas whenever its element resizes (e.g. the right side
+  // panel hides/shows and the grid column collapses).
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(resizeCanvas).observe(canvas);
+  }
   resetView();
   resizeCanvas();
   refreshUnitLabels();
