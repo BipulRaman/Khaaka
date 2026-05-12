@@ -98,10 +98,6 @@
         </select>
       </label>
       <span class="sep"></span>
-      <button class="ghost" id="btn-new" title="New (Ctrl+N)">
-        <svg class="ic"><use href="#i-plus"/></svg><span>New</span>
-      </button>
-      <span class="sep"></span>
       <div class="dropdown" id="file-dropdown">
         <button class="ghost dropdown-trigger" id="btn-file" type="button" title="Open / Save to a file on your computer" aria-haspopup="true" aria-expanded="false">
           <svg class="ic"><use href="#i-folder-open"/></svg><span>File</span>
@@ -166,6 +162,14 @@
       </div>
     </div>
   </header>
+
+  <!-- ============================== TAB STRIP ============================== -->
+  <nav class="tab-strip" id="tab-strip" role="tablist" aria-label="Open files">
+    <div class="tab-list" id="tab-list"><!-- tabs injected by app.js --></div>
+    <button class="tab-add" id="tab-add" type="button" title="New tab (Ctrl+T)" aria-label="New tab">
+      <svg class="ic"><use href="#i-plus"/></svg>
+    </button>
+  </nav>
 
   <main class="workspace">
     <!-- ============================== TOOLBAR ============================== -->

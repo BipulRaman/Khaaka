@@ -313,6 +313,128 @@ button { font-family: inherit; }
 .topbar-actions .primary.is-saved:hover,
 .topbar-actions .primary:disabled:hover { filter: none; }
 
+/* ============================ TAB STRIP ============================ */
+
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: linear-gradient(180deg, #f6f8fc 0%, #eef1f6 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+  overflow: hidden;
+}
+.tab-list {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.tab-list::-webkit-scrollbar { height: 6px; }
+.tab-list::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.18); border-radius: 3px; }
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  white-space: nowrap;
+}
+.tab:hover {
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-soft);
+}
+.tab.active {
+  background: var(--bg, #ffffff);
+  border-color: var(--border);
+  color: var(--text);
+  position: relative;
+}
+.tab.active::after {
+  /* Hide the workspace's top border under the active tab */
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: var(--bg, #ffffff);
+}
+.tab-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.tab-dirty {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #4a76f5);
+  display: none;
+}
+.tab.dirty .tab-dirty { display: inline-block; }
+.tab-close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.65;
+  transition: background var(--t-fast), color var(--t-fast), opacity var(--t-fast);
+}
+.tab:hover .tab-close,
+.tab.active .tab-close { opacity: 1; }
+.tab-close:hover {
+  background: rgba(225, 29, 72, 0.10);
+  color: var(--danger, #e11d48);
+}
+.tab-close .ic { width: 12px; height: 12px; }
+
+.tab-add {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin-top: 4px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.tab-add:hover { background: rgba(15, 23, 42, 0.06); color: var(--text); }
+.tab-add .ic { width: 14px; height: 14px; }
+
 /* ============================ WORKSPACE ============================ */
 
 .workspace {

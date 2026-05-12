@@ -5,26 +5,37 @@
   'use strict';
 
   // ---------- State ----------
-  const state = {
-    objects: [],        // all shapes in z-order
-    selectedId: null,
-    tool: 'select',
-    nextId: 1,
-    view: { x: 0, y: 0, zoom: 1 }, // pan in screen px, zoom multiplier
-    pxPerMeter: 40,
-    pxPerBox: 25,        // screen pixels per grid box (drives pxPerMeter)
-    grid: { show: true, snap: true, size: 0.3048 }, // 1 ft default
-    showDims: true,
-    units: 'ft', // 'm' = meters, 'ft' = feet & inches
-    defaultWallThickness: 0.1524, // 6" in meters
-    projectName: 'Untitled Layout',
-    history: [],
-    future: [],
-  };
+  // Each open tab owns its own state object. The module-level `state` is a
+  // reference to the active tab's state, swapped in switchToTab(). Code that
+  // reads/writes `state.X` continues to work — it just always points at the
+  // active tab.
+  function makeBlankState() {
+    return {
+      objects: [],        // all shapes in z-order
+      selectedId: null,
+      tool: 'select',
+      nextId: 1,
+      view: { x: 0, y: 0, zoom: 1 }, // pan in screen px, zoom multiplier
+      pxPerMeter: 40,
+      pxPerBox: 25,        // screen pixels per grid box (drives pxPerMeter)
+      grid: { show: true, snap: true, size: 0.3048 }, // 1 ft default
+      showDims: true,
+      units: 'ft', // 'm' = meters, 'ft' = feet & inches
+      defaultWallThickness: 0.1524, // 6" in meters
+      projectName: 'Untitled Layout',
+      history: [],
+      future: [],
+    };
+  }
+  let state = makeBlankState();
 
   const M_PER_FT = 0.3048;
 
+  // Legacy single-tab key (still read once at startup for migration).
   const STORAGE_KEY = 'plotly.layout.v1';
+  // Multi-tab keys
+  const TABS_KEY = 'khaaka.tabs.v1';            // [{ id, name, snapJSON, fileName }]
+  const ACTIVE_TAB_KEY = 'khaaka.tabs.active.v1';
 
   // ---------- DOM ----------
   const canvas = document.getElementById('canvas');
@@ -1611,40 +1622,15 @@
   bindDropdown('settings-dropdown', 'btn-settings', 'settings-panel');
   bindDropdown('file-dropdown', 'btn-file', 'file-panel');
 
-  document.getElementById('btn-new').addEventListener('click', async () => {
-    const ok = await showModal({
-      kind: 'confirm',
-      title: 'Start a new layout?',
-      message: 'This will clear the current canvas. Unsaved changes will be lost.',
-      okText: 'New layout',
-      cancelText: 'Keep editing',
-      danger: true,
-    });
-    if (!ok) return;
-    state.objects = [];
-    state.selectedId = null;
-    state.history = [];
-    state.future = [];
-    state.projectName = 'Untitled Layout';
-    const pn = document.getElementById('project-name');
-    if (pn) pn.value = state.projectName;
-    // Detach any bound file — "New" starts a fresh, unsaved layout.
-    currentFile.handle = null;
-    currentFile.name = null;
-    lastSavedFileSnapshot = null;
-    lastSavedAt = null;
-    clearPersistedHandle();
-    updateFileMeta();
-    refreshAll();
-  });
-
   // Project name input \u2014 keep state in sync.
   (() => {
     const pn = document.getElementById('project-name');
     if (!pn) return;
     pn.value = state.projectName;
+    sizeProjectNameInput();
     pn.addEventListener('input', () => {
       state.projectName = pn.value;
+      sizeProjectNameInput();
       scheduleAutosave();
     });
     // Blur normalizes blank to placeholder default and renames the disk file
@@ -1654,6 +1640,7 @@
         state.projectName = 'Untitled Layout';
         pn.value = state.projectName;
       }
+      sizeProjectNameInput();
       scheduleAutosave();
       renameBoundFileToProject();
     });
@@ -1661,6 +1648,24 @@
       if (e.key === 'Enter') { e.preventDefault(); pn.blur(); }
     });
   })();
+
+  // Cross-browser content-fit for the project-name input.
+  // Chromium uses CSS `field-sizing: content`; Firefox / Safari fall back to
+  // measuring the rendered text width here so the .json suffix sits flush.
+  function sizeProjectNameInput() {
+    const pn = document.getElementById('project-name');
+    if (!pn) return;
+    // Skip the JS sizing when the browser handles it natively.
+    if (CSS && CSS.supports && CSS.supports('field-sizing', 'content')) return;
+    const text = pn.value || pn.placeholder || '';
+    const cs = window.getComputedStyle(pn);
+    const c = sizeProjectNameInput._c
+      || (sizeProjectNameInput._c = document.createElement('canvas').getContext('2d'));
+    c.font = `${cs.fontStyle || 'normal'} ${cs.fontVariant || 'normal'} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const w = c.measureText(text).width;
+    // Add a small caret allowance, clamp between min/max.
+    pn.style.width = `${Math.max(48, Math.min(320, Math.ceil(w) + 6))}px`;
+  }
 
   // Rename the bound file on disk so its name matches the project title.
   // Uses FileSystemFileHandle.move(newName) \u2014 Chromium 110+, same-directory
@@ -1676,13 +1681,27 @@
       if (!ok) return;
       await currentFile.handle.move(desired);
       currentFile.name = desired;
-      persistHandle(currentFile.handle, desired, lastSavedAt || Date.now());
+      persistHandle(currentFile.handle, desired, lastSavedAt || Date.now(), activeTabId);
       updateFileMeta();
       flash(`Renamed to ${desired}`);
     } catch (err) {
       console.warn('Could not rename file on disk', err);
       flash('Could not rename file on disk');
     }
+  }
+
+  // After opening a file, set the editable project title (and underlying
+  // state) to match the file's base name so the on-disk name is the source
+  // of truth. Strips the extension; falls back to existing project name if
+  // the file name has no base.
+  function syncProjectNameToFile(fileName) {
+    if (!fileName) return;
+    const base = fileName.replace(/\.[^.]+$/, '').trim();
+    if (!base) return;
+    state.projectName = base;
+    const pn = document.getElementById('project-name');
+    if (pn) pn.value = base;
+    if (typeof sizeProjectNameInput === 'function') sizeProjectNameInput();
   }
 
   // ---------- Open / Save to a file on the user's computer ----------
@@ -1696,7 +1715,8 @@
     'showSaveFilePicker' in window;
 
   // Currently bound file (null until the user opens or saves one).
-  const currentFile = { handle: null, name: null };
+  // Currently bound file for the active tab. Reassigned on tab switch.
+  let currentFile = { handle: null, name: null };
 
   const FILE_PICKER_TYPES = [{
     description: 'Khaaka Layout (JSON)',
@@ -1707,9 +1727,9 @@
   // Handles are structured-cloneable so we can stash them in IndexedDB.
   // localStorage cannot hold them. On reload we restore { handle, name } but
   // permission must be re-granted on a user gesture (browser security rule).
+  // Records are now keyed per tab id so multiple tabs persist independently.
   const HANDLE_DB = 'khaaka-fs';
   const HANDLE_STORE = 'handles';
-  const HANDLE_KEY = 'currentFile';
 
   function openHandleDb() {
     return new Promise((resolve, reject) => {
@@ -1723,13 +1743,14 @@
       req.onerror = () => reject(req.error);
     });
   }
-  async function persistHandle(handle, name, savedAt) {
+  async function persistHandle(handle, name, savedAt, tabId) {
     if (!hasFSAccess) return;
+    const key = tabId || (activeTab() && activeTab().id) || 'currentFile';
     try {
       const db = await openHandleDb();
       await new Promise((res, rej) => {
         const tx = db.transaction(HANDLE_STORE, 'readwrite');
-        tx.objectStore(HANDLE_STORE).put({ handle, name, savedAt: savedAt || Date.now() }, HANDLE_KEY);
+        tx.objectStore(HANDLE_STORE).put({ handle, name, savedAt: savedAt || Date.now() }, key);
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
       });
@@ -1738,31 +1759,296 @@
       console.warn('Could not persist file handle', err);
     }
   }
-  async function clearPersistedHandle() {
+  async function clearPersistedHandle(tabId) {
+    const key = tabId || (activeTab() && activeTab().id) || 'currentFile';
     try {
       const db = await openHandleDb();
       await new Promise((res, rej) => {
         const tx = db.transaction(HANDLE_STORE, 'readwrite');
-        tx.objectStore(HANDLE_STORE).delete(HANDLE_KEY);
+        tx.objectStore(HANDLE_STORE).delete(key);
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
       });
       db.close();
     } catch { /* ignore */ }
   }
-  async function loadPersistedHandle() {
+  async function loadPersistedHandle(tabId) {
     if (!hasFSAccess) return null;
+    const key = tabId || 'currentFile';
     try {
       const db = await openHandleDb();
       const rec = await new Promise((res, rej) => {
         const tx = db.transaction(HANDLE_STORE, 'readonly');
-        const r = tx.objectStore(HANDLE_STORE).get(HANDLE_KEY);
+        const r = tx.objectStore(HANDLE_STORE).get(key);
         r.onsuccess = () => res(r.result || null);
         r.onerror = () => rej(r.error);
       });
       db.close();
       return rec;
     } catch { return null; }
+  }
+
+  // ---------- Tabs (multi-document) ----------
+  // Each tab owns: state, currentFile, lastSavedFileSnapshot, lastSavedAt.
+  // The module-level `state` and `currentFile` always point at the active
+  // tab so the rest of the app keeps working unchanged.
+  const tabs = [];
+  let activeTabId = null;
+  function activeTab() {
+    return tabs.find(t => t.id === activeTabId) || null;
+  }
+  function makeTabId() {
+    return 't_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+  }
+  function makeTab(opts = {}) {
+    return {
+      id: opts.id || makeTabId(),
+      state: opts.state || makeBlankState(),
+      currentFile: opts.currentFile || { handle: null, name: null },
+      lastSavedFileSnapshot: opts.lastSavedFileSnapshot || null,
+      lastSavedAt: opts.lastSavedAt || null,
+    };
+  }
+  function snapshotActiveTab() {
+    const t = activeTab();
+    if (!t) return;
+    t.state = state;
+    t.currentFile = currentFile;
+    t.lastSavedFileSnapshot = lastSavedFileSnapshot;
+    t.lastSavedAt = lastSavedAt;
+  }
+  function hydrateTab(t) {
+    state = t.state;
+    currentFile = t.currentFile;
+    lastSavedFileSnapshot = t.lastSavedFileSnapshot;
+    lastSavedAt = t.lastSavedAt;
+  }
+
+  // Push the active tab's state into the UI (project name, units, grid
+  // toggles, tool selection). Caller is responsible for the canvas redraw.
+  function syncUIFromState() {
+    const pn = document.getElementById('project-name');
+    if (pn) pn.value = state.projectName;
+    if (typeof sizeProjectNameInput === 'function') sizeProjectNameInput();
+    const optGrid = document.getElementById('opt-grid');
+    if (optGrid) optGrid.checked = !!state.grid.show;
+    const optSnap = document.getElementById('opt-snap');
+    if (optSnap) optSnap.checked = !!state.grid.snap;
+    const optDims = document.getElementById('opt-dims');
+    if (optDims) optDims.checked = !!state.showDims;
+    const optUnits = document.getElementById('opt-units');
+    if (optUnits) optUnits.value = state.units;
+    const optBoxPx = document.getElementById('opt-box-px');
+    if (optBoxPx) optBoxPx.value = String(state.pxPerBox);
+    document.querySelectorAll('.tool[data-tool]').forEach(b => {
+      b.classList.toggle('active', b.dataset.tool === state.tool);
+    });
+    if (typeof refreshUnitLabels === 'function') refreshUnitLabels();
+  }
+
+  function switchToTab(id) {
+    if (id === activeTabId) { renderTabStrip(); return; }
+    snapshotActiveTab();
+    const next = tabs.find(t => t.id === id);
+    if (!next) return;
+    activeTabId = id;
+    hydrateTab(next);
+    syncUIFromState();
+    if (typeof refreshAll === 'function') refreshAll();
+    updateFileMeta();
+    if (typeof updateSaveButton === 'function') updateSaveButton();
+    renderTabStrip();
+    persistTabs();
+  }
+
+  function createTab(opts = {}) {
+    snapshotActiveTab();
+    const t = makeTab(opts);
+    tabs.push(t);
+    if (opts.activate !== false) {
+      activeTabId = t.id;
+      hydrateTab(t);
+      syncUIFromState();
+      if (typeof refreshAll === 'function') refreshAll();
+      updateFileMeta();
+      if (typeof updateSaveButton === 'function') updateSaveButton();
+    }
+    renderTabStrip();
+    persistTabs();
+    return t;
+  }
+
+  async function closeTab(id) {
+    const i = tabs.findIndex(t => t.id === id);
+    if (i < 0) return;
+    if (id === activeTabId) snapshotActiveTab();
+    const t = tabs[i];
+    const dirty = isTabDirty(t);
+    if (dirty) {
+      if (id !== activeTabId) switchToTab(id);
+      const choice = await showModal({
+        kind: 'confirm',
+        title: 'Close this file?',
+        message: `"${t.currentFile.name || (t.state.projectName + '.json')}" has unsaved changes. Save before closing, or discard them.`,
+        okText: 'Save & close',
+        extraText: 'Discard & close',
+        cancelText: 'Cancel',
+      });
+      if (choice === false) return;     // Cancel / Esc / backdrop
+      if (choice === true) {
+        try {
+          if (currentFile.handle) await saveToFile();
+          else await saveAsToFile();
+        } catch (err) {
+          flash('Could not save — close cancelled');
+          return;
+        }
+      }
+    }
+    clearPersistedHandle(t.id);
+    const wasActive = id === activeTabId;
+    tabs.splice(i, 1);
+    if (wasActive) {
+      const neighbor = tabs[i] || tabs[i - 1];
+      if (neighbor) {
+        activeTabId = neighbor.id;
+        hydrateTab(neighbor);
+      } else {
+        const fresh = makeTab();
+        tabs.push(fresh);
+        activeTabId = fresh.id;
+        hydrateTab(fresh);
+      }
+      syncUIFromState();
+      refreshAll();
+      updateFileMeta();
+      updateSaveButton();
+    }
+    renderTabStrip();
+    persistTabs();
+  }
+
+  // Stable serialization used for dirty checks and persistence.
+  function serializeState(s) {
+    return JSON.stringify({
+      version: 1,
+      pxPerMeter: s.pxPerMeter, pxPerBox: s.pxPerBox,
+      grid: s.grid, showDims: s.showDims, units: s.units,
+      defaultWallThickness: s.defaultWallThickness,
+      projectName: s.projectName,
+      view: s.view, objects: s.objects, nextId: s.nextId,
+    }, null, 2);
+  }
+  function isTabDirty(t) {
+    const s = (t.id === activeTabId) ? state : t.state;
+    const cf = (t.id === activeTabId) ? currentFile : t.currentFile;
+    const last = (t.id === activeTabId) ? lastSavedFileSnapshot : t.lastSavedFileSnapshot;
+    if (!cf || !cf.name) return false;
+    return serializeState(s) !== last;
+  }
+
+  function persistTabs() {
+    try {
+      const list = tabs.map(t => {
+        const s = (t.id === activeTabId) ? state : t.state;
+        const cf = (t.id === activeTabId) ? currentFile : t.currentFile;
+        return {
+          id: t.id,
+          fileName: cf && cf.name || null,
+          snap: serializeState(s),
+        };
+      });
+      localStorage.setItem(TABS_KEY, JSON.stringify(list));
+      localStorage.setItem(ACTIVE_TAB_KEY, activeTabId || '');
+    } catch (err) {
+      console.warn('Could not persist tabs', err);
+    }
+  }
+
+  // Restore tabs from localStorage + IDB. Returns true if at least one tab
+  // was hydrated; false if there was nothing to restore.
+  async function restoreTabs() {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(TABS_KEY) || '[]'); } catch { list = []; }
+    const activeStored = localStorage.getItem(ACTIVE_TAB_KEY) || '';
+    if (list.length === 0) {
+      // Migration from the legacy single-tab key.
+      const legacy = localStorage.getItem(STORAGE_KEY);
+      if (legacy) list = [{ id: makeTabId(), fileName: null, snap: legacy }];
+    }
+    if (list.length === 0) return false;
+
+    for (const rec of list) {
+      const t = makeTab({ id: rec.id });
+      try {
+        const d = JSON.parse(rec.snap);
+        Object.assign(t.state, {
+          objects: d.objects || [],
+          nextId: d.nextId || (Math.max(0, ...((d.objects || []).map(o => o.id))) + 1),
+          pxPerMeter: d.pxPerMeter || 40,
+          pxPerBox: d.pxPerBox || 25,
+          grid: d.grid || t.state.grid,
+          showDims: d.showDims !== undefined ? d.showDims : true,
+          units: d.units === 'ft' ? 'ft' : 'm',
+          defaultWallThickness: typeof d.defaultWallThickness === 'number' ? d.defaultWallThickness : t.state.defaultWallThickness,
+          projectName: typeof d.projectName === 'string' && d.projectName.trim() ? d.projectName : t.state.projectName,
+          view: d.view && typeof d.view.zoom === 'number' ? {
+            x: typeof d.view.x === 'number' ? d.view.x : 0,
+            y: typeof d.view.y === 'number' ? d.view.y : 0,
+            zoom: Math.max(0.1, Math.min(8, d.view.zoom)),
+          } : t.state.view,
+        });
+        t.lastSavedFileSnapshot = rec.snap;
+      } catch (err) {
+        console.warn('Could not restore tab snapshot', err);
+      }
+      // Re-attach the file handle (Chromium FS Access only).
+      const handleRec = await loadPersistedHandle(t.id);
+      if (handleRec && handleRec.handle) {
+        t.currentFile = { handle: handleRec.handle, name: handleRec.name || rec.fileName || null };
+        t.lastSavedAt = handleRec.savedAt || null;
+      } else if (rec.fileName) {
+        t.currentFile = { handle: null, name: rec.fileName };
+      }
+      tabs.push(t);
+    }
+    const activeRec = tabs.find(t => t.id === activeStored) || tabs[0];
+    activeTabId = activeRec.id;
+    hydrateTab(activeRec);
+    return true;
+  }
+
+  function renderTabStrip() {
+    const list = document.getElementById('tab-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const t of tabs) {
+      const isActive = t.id === activeTabId;
+      const cf = isActive ? currentFile : t.currentFile;
+      const s = isActive ? state : t.state;
+      const dirty = isTabDirty(t);
+      const el = document.createElement('div');
+      el.className = 'tab' + (isActive ? ' active' : '') + (dirty ? ' dirty' : '');
+      el.setAttribute('role', 'tab');
+      el.setAttribute('aria-selected', String(isActive));
+      const label = cf.name || `${s.projectName || 'Untitled'}.json`;
+      el.title = label;
+      el.innerHTML =
+        `<span class="tab-name">${escapeHtml(label)}</span>` +
+        `<span class="tab-dirty" aria-hidden="true"></span>` +
+        `<button class="tab-close" type="button" title="Close" aria-label="Close tab">` +
+          `<svg class="ic"><use href="#i-x"/></svg>` +
+        `</button>`;
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.tab-close')) return;
+        switchToTab(t.id);
+      });
+      el.querySelector('.tab-close').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeTab(t.id);
+      });
+      list.appendChild(el);
+    }
   }
 
   function updateFileMeta() {
@@ -1867,6 +2153,7 @@
   }
 
   async function openFromFile() {
+    // Always opens into a NEW tab. Current tab stays untouched.
     try {
       if (hasFSAccess) {
         let handle;
@@ -1882,15 +2169,18 @@
         }
         const file = await handle.getFile();
         const text = await file.text();
+        // Spawn a fresh tab and load into it.
+        createTab();
         if (deserialize(text)) {
           currentFile.handle = handle;
           currentFile.name = file.name;
+          syncProjectNameToFile(file.name);
           lastSavedFileSnapshot = serialize();
-          // Use the file's own modification time when available so the label
-          // reflects when it was last written, not when it was opened here.
           lastSavedAt = (file.lastModified || Date.now());
-          persistHandle(handle, file.name, lastSavedAt);
+          persistHandle(handle, file.name, lastSavedAt, activeTabId);
           updateFileMeta();
+          renderTabStrip();
+          persistTabs();
           flash(`Opened ${file.name}`);
         }
       } else {
@@ -1924,7 +2214,7 @@
         currentFile.name = handle.name || exportFilename('json');
         lastSavedFileSnapshot = text;
         lastSavedAt = Date.now();
-        persistHandle(handle, currentFile.name, lastSavedAt);
+        persistHandle(handle, currentFile.name, lastSavedAt, activeTabId);
         updateFileMeta();
         flash(`Saved to ${currentFile.name}`);
       } else {
@@ -1959,7 +2249,7 @@
       await w.close();
       lastSavedFileSnapshot = text;
       lastSavedAt = Date.now();
-      persistHandle(currentFile.handle, currentFile.name, lastSavedAt);
+      persistHandle(currentFile.handle, currentFile.name, lastSavedAt, activeTabId);
       updateFileMeta();
       flash(`Saved to ${currentFile.name}`);
     } catch (err) {
@@ -1994,17 +2284,27 @@
     if (!file) return;
     try {
       const text = await readFileAsText(file);
+      // Open into a new tab.
+      createTab();
       if (deserialize(text)) {
         currentFile.handle = null;       // no handle on fallback
         currentFile.name = file.name;
+        syncProjectNameToFile(file.name);
         lastSavedFileSnapshot = serialize();
         lastSavedAt = (file.lastModified || Date.now());
         updateFileMeta();
+        renderTabStrip();
+        persistTabs();
         flash(`Opened ${file.name}`);
       }
     } catch (err) {
       flash('Open failed');
     }
+  });
+
+  // "+" button on the tab strip → blank new tab.
+  document.getElementById('tab-add').addEventListener('click', () => {
+    createTab();
   });
 
   // Canvas option inputs
@@ -2115,7 +2415,9 @@
         }
         return;
       }
-      if (k === 'n') { e.preventDefault(); document.getElementById('btn-new').click(); return; }
+      if (k === 'n') { e.preventDefault(); createTab(); return; }
+      if (k === 't') { e.preventDefault(); createTab(); return; }
+      if (k === 'w') { e.preventDefault(); if (activeTabId) closeTab(activeTabId); return; }
     }
     const map = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
     if (map[e.key.toLowerCase()]) {
@@ -2443,7 +2745,7 @@
     autosaveTimer = null;
     try {
       const snap = serialize();
-      localStorage.setItem(STORAGE_KEY, snap);
+      localStorage.setItem(STORAGE_KEY, snap);  // legacy mirror
       lastSavedSnapshot = snap;
     } catch (err) {
       // Storage may be full or unavailable (private mode, quota, etc.)
@@ -2453,6 +2755,9 @@
     if (currentFile.handle) autosaveToDisk();
     updateFileMeta();
     updateSaveButton();
+    // Multi-tab: persist all tab snapshots + dirty state on the strip.
+    persistTabs();
+    renderTabStrip();
   }
 
   // Coalescing disk-writer: at most one in-flight write at a time. If new
@@ -2472,7 +2777,7 @@
       await w.close();
       lastSavedFileSnapshot = text;
       lastSavedAt = Date.now();
-      persistHandle(currentFile.handle, currentFile.name, lastSavedAt);
+      persistHandle(currentFile.handle, currentFile.name, lastSavedAt, activeTabId);
       updateFileMeta();
       updateSaveButton();
     } catch (err) {
@@ -2484,7 +2789,7 @@
         currentFile.name = null;
         lastSavedFileSnapshot = null;
         lastSavedAt = null;
-        clearPersistedHandle();
+        clearPersistedHandle(activeTabId);
         updateFileMeta();
         updateSaveButton();
         flash('File no longer accessible — Save again to pick a new location');
@@ -2709,6 +3014,23 @@
     cancelBtn.hidden = (kind === 'alert');
     okBtn.classList.toggle('danger', !!opts.danger);
 
+    // Optional middle button (e.g. "Discard & open"). Inserted between
+    // Cancel and OK; resolves the promise with the string 'extra'.
+    let extraBtn = document.getElementById('modal-extra');
+    if (opts.extraText) {
+      if (!extraBtn) {
+        extraBtn = document.createElement('button');
+        extraBtn.id = 'modal-extra';
+        extraBtn.type = 'button';
+        extraBtn.className = 'modal-btn modal-btn-ghost';
+        cancelBtn.parentNode.insertBefore(extraBtn, okBtn);
+      }
+      extraBtn.textContent = opts.extraText;
+      extraBtn.hidden = false;
+    } else if (extraBtn) {
+      extraBtn.hidden = true;
+    }
+
     if (kind === 'prompt') {
       inputEl.hidden = false;
       inputEl.value = opts.defaultValue ?? '';
@@ -2727,6 +3049,7 @@
         backdrop.setAttribute('aria-hidden', 'true');
         okBtn.removeEventListener('click', onOk);
         cancelBtn.removeEventListener('click', onCancel);
+        if (extraBtn) extraBtn.removeEventListener('click', onExtra);
         backdrop.removeEventListener('mousedown', onBackdrop);
         document.removeEventListener('keydown', onKey, true);
         resolve(result);
@@ -2740,6 +3063,7 @@
         if (kind === 'prompt') close(null);
         else close(false);
       };
+      const onExtra = () => close('extra');
       const onBackdrop = (e) => { if (e.target === backdrop) onCancel(); };
       const onKey = (e) => {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
@@ -2750,6 +3074,7 @@
       };
       okBtn.addEventListener('click', onOk);
       cancelBtn.addEventListener('click', onCancel);
+      if (extraBtn && opts.extraText) extraBtn.addEventListener('click', onExtra);
       backdrop.addEventListener('mousedown', onBackdrop);
       document.addEventListener('keydown', onKey, true);
       // Focus management
@@ -2931,39 +3256,27 @@
   resizeCanvas();
   refreshUnitLabels();
   initCollapsibleCards();
-  // Auto-load last saved layout if present
-  const last = localStorage.getItem(STORAGE_KEY);
-  if (last) {
-    try { deserialize(last); } catch { /* ignore */ }
-  } else {
-    seedSampleLayout();
-    refreshAll();
-  }
-  // Treat the freshly initialized state as "saved" so the file-meta dirty dot starts clean.
-  lastSavedSnapshot = serialize();
-  updateFileMeta();
-  updateSaveButton();
 
-  // Restore any previously bound file handle (FS Access API only). The
-  // handle round-trips through IndexedDB. Permission is NOT auto-granted on
-  // reload — we just re-attach the name so the UI shows "Saved as …" and
-  // mark the in-memory state as in-sync with the file. The first save click
-  // (a user gesture) re-prompts for write permission via ensureWritePermission.
+  // ---------- Multi-tab bootstrap ----------
+  // Restore the saved tab list (handles via IDB, snapshots via localStorage,
+  // legacy single-tab key migrated automatically). If nothing to restore,
+  // create a fresh tab and seed the sample layout.
   (async () => {
-    try {
-      const rec = await loadPersistedHandle();
-      if (!rec || !rec.handle) return;
-      currentFile.handle = rec.handle;
-      currentFile.name = rec.name || rec.handle.name || 'Untitled.json';
-      lastSavedAt = rec.savedAt || null;
-      // Treat localStorage's snapshot as the file's last known content. If the
-      // user hasn't edited anything since closing, the dirty dot stays off.
-      lastSavedFileSnapshot = serialize();
-      updateFileMeta();
-      updateSaveButton();
-    } catch (err) {
-      console.warn('Could not restore file handle', err);
+    const restored = await restoreTabs();
+    if (!restored) {
+      const t = makeTab();
+      tabs.push(t);
+      activeTabId = t.id;
+      hydrateTab(t);
+      seedSampleLayout();
     }
+    syncUIFromState();
+    refreshAll();
+    lastSavedSnapshot = serialize();
+    updateFileMeta();
+    updateSaveButton();
+    renderTabStrip();
+    persistTabs();
   })();
 
   // Polished default plot \u2014 a small 2-bedroom apartment using only the
