@@ -52,6 +52,8 @@
       <symbol id="i-save"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 0 1 2-2h10l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></symbol>
       <symbol id="i-export"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 16V4M7 9l5-5 5 5"/></symbol>
       <symbol id="i-import"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 4v12M7 11l5 5 5-5"/></symbol>
+      <symbol id="i-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 8a2 2 0 0 1-2 1.5H5a2 2 0 0 1-2-1.5z"/></symbol>
+      <symbol id="i-save-as" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 0 1 2-2h8l4 4v6"/><path d="M8 3v6h7"/><path d="M14 17h7M17.5 13.5L21 17l-3.5 3.5"/></symbol>
       <symbol id="i-image"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M3 17l5-4 5 4 3-2 5 4"/></symbol>
       <symbol id="i-json"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H6a2 2 0 0 0-2 2v3M9 20H6a2 2 0 0 1-2-2v-3M15 4h3a2 2 0 0 1 2 2v3M15 20h3a2 2 0 0 0 2-2v-3"/></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
@@ -80,8 +82,12 @@
       <span class="brand-name">Khaaka</span>
       <small class="brand-tag">Layout Studio</small>
     </div>
-    <div class="project-name" title="Project name (used for exports)">
-      <input id="project-name" type="text" maxlength="80" placeholder="Untitled Layout" autocomplete="off" spellcheck="false" />
+    <div class="project-name" title="Project name (used as the file name when saving)">
+      <div class="title-row">
+        <input id="project-name" type="text" maxlength="80" placeholder="Untitled Layout" autocomplete="off" spellcheck="false" />
+        <span class="ext-suffix" id="ext-suffix" aria-hidden="true">.json</span>
+      </div>
+      <span class="file-name" id="file-name" aria-live="polite" title="Current file">Unsaved</span>
     </div>
     <div class="topbar-actions">
       <label class="units-select" title="Display units">
@@ -96,26 +102,39 @@
         <svg class="ic"><use href="#i-plus"/></svg><span>New</span>
       </button>
       <span class="sep"></span>
-      <label class="ghost file-btn" title="Import JSON">
-        <svg class="ic"><use href="#i-import"/></svg><span>Import</span>
-        <input type="file" id="file-import" accept="application/json" hidden />
-      </label>
-      <div class="dropdown" id="export-dropdown">
-        <button class="ghost dropdown-trigger" id="btn-export" type="button" title="Export" aria-haspopup="true" aria-expanded="false">
-          <svg class="ic"><use href="#i-export"/></svg><span>Export</span>
+      <div class="dropdown" id="file-dropdown">
+        <button class="ghost dropdown-trigger" id="btn-file" type="button" title="Open / Save to a file on your computer" aria-haspopup="true" aria-expanded="false">
+          <svg class="ic"><use href="#i-folder-open"/></svg><span>File</span>
           <svg class="ic ic-chevron"><use href="#i-chevron"/></svg>
         </button>
-        <div class="dropdown-panel dropdown-menu" id="export-panel" hidden role="menu" aria-label="Export options">
-          <button type="button" class="dropdown-item" id="btn-export-json" role="menuitem">
-            <svg class="ic"><use href="#i-json"/></svg>
-            <span>Export JSON</span>
+        <div class="dropdown-panel dropdown-menu" id="file-panel" hidden role="menu" aria-label="File">
+          <button type="button" class="dropdown-item" id="btn-open-file" role="menuitem">
+            <svg class="ic"><use href="#i-import"/></svg>
+            <span class="dd-label">Open File…</span>
+            <span class="kbd-hint">Ctrl+O</span>
           </button>
+          <button type="button" class="dropdown-item" id="btn-save-file" role="menuitem">
+            <svg class="ic"><use href="#i-save"/></svg>
+            <span class="dd-label">Save File</span>
+            <span class="kbd-hint">Ctrl+S</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-save-as-file" role="menuitem">
+            <svg class="ic"><use href="#i-save-as"/></svg>
+            <span class="dd-label">Save File As…</span>
+            <span class="kbd-hint">Ctrl+Shift+S</span>
+          </button>
+          <div class="dropdown-divider" role="separator"></div>
           <button type="button" class="dropdown-item" id="btn-export-png" role="menuitem">
             <svg class="ic"><use href="#i-image"/></svg>
-            <span>Export Image</span>
+            <span class="dd-label">Export as Image…</span>
           </button>
         </div>
       </div>
+      <span class="sep"></span>
+      <input type="file" id="file-open-fallback" accept=".json,application/json" hidden />
+      <button class="primary" id="btn-save" type="button" title="Save to file (Ctrl+S)">
+        <svg class="ic"><use href="#i-save"/></svg><span>Save</span>
+      </button>
       <span class="sep"></span>
       <div class="dropdown" id="settings-dropdown">
         <button class="ghost" id="btn-settings" type="button" title="Scale & canvas settings" aria-haspopup="true" aria-expanded="false">
@@ -145,10 +164,6 @@
           </div>
         </div>
       </div>
-      <span class="sep"></span>
-      <button class="primary" id="btn-save" title="Save to browser (Ctrl+S)">
-        <svg class="ic"><use href="#i-save"/></svg><span>Save</span>
-      </button>
     </div>
   </header>
 
@@ -179,11 +194,6 @@
         <button id="btn-delete"    title="Delete (Del)" class="danger"><svg class="ic"><use href="#i-trash"/></svg></button>
       </div>
       <div class="tool-spacer"></div>
-      <div class="tool-group">
-        <button id="btn-zoom-in"    title="Zoom In (+)"><svg class="ic"><use href="#i-zoom-in"/></svg></button>
-        <button id="btn-zoom-out"   title="Zoom Out (−)"><svg class="ic"><use href="#i-zoom-out"/></svg></button>
-        <button id="btn-zoom-reset" title="Reset View (0)"><svg class="ic"><use href="#i-frame"/></svg></button>
-      </div>
     </aside>
 
     <!-- ============================== CANVAS ============================== -->
@@ -191,7 +201,11 @@
       <canvas id="canvas"></canvas>
       <div class="hint" id="hint" hidden>Pick a tool and start drawing. Wheel to zoom, middle-drag to pan. Right-click switches to Select / Move.</div>
       <div class="toast" id="toast" hidden></div>
-      <div class="status" id="status">x: 0 &nbsp;|&nbsp; y: 0 &nbsp;|&nbsp; zoom: 100%</div>
+      <div class="zoom-bar" id="status" role="group" aria-label="Zoom">
+        <button type="button" id="btn-zoom-out-bar" class="zoom-btn" title="Zoom Out (−)" aria-label="Zoom out">−</button>
+        <button type="button" id="btn-zoom-reset-bar" class="zoom-pct" title="Reset View (0)" aria-label="Reset view">100%</button>
+        <button type="button" id="btn-zoom-in-bar" class="zoom-btn" title="Zoom In (+)" aria-label="Zoom in">+</button>
+      </div>
     </section>
 
     <!-- ========================= PROPERTIES PANEL ========================= -->

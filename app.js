@@ -30,7 +30,6 @@
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   const hint = document.getElementById('hint');
-  const status = document.getElementById('status');
   const layerList = document.getElementById('layer-list');
 
   // ---------- Limited color palettes (light shades only) ----------
@@ -614,11 +613,8 @@
   // ---------- Status / Hint ----------
   function setHint(msg) { hint.textContent = msg; }
   function updateStatus() {
-    const unit = state.units === 'ft' ? 'ft' : 'm';
-    const boxLabel = state.units === 'ft'
-      ? `${fmt(mToFt(state.grid.size))} ft`
-      : `${fmt(state.grid.size)} m`;
-    status.textContent = `zoom: ${Math.round(state.view.zoom * 100)}%  |  units: ${unit}  |  box: ${boxLabel} = ${state.pxPerBox}px  |  objects: ${state.objects.length}`;
+    const pct = document.getElementById('btn-zoom-reset-bar');
+    if (pct) pct.textContent = `${Math.round(state.view.zoom * 100)}%`;
   }
 
   // ---------- Tools / Interaction ----------
@@ -944,9 +940,9 @@
   // Compact horizontal icon-button row for the context menu (e.g. Undo / Redo
   // / Delete at the top). Each item:
   //   { iconId, title, shortcut?, onClick, disabled, danger }
-  function ctxIconRow(items) {
+  function ctxIconRow(items, opts = {}) {
     const row = document.createElement('div');
-    row.className = 'ctx-icon-row';
+    row.className = 'ctx-icon-row' + (opts.compact ? ' compact' : '');
     items.forEach(it => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -955,7 +951,9 @@
       b.title = it.title || '';
       b.setAttribute('aria-label', it.title || '');
       b.innerHTML =
-        `<svg class="ic"><use href="#${it.iconId}"/></svg>` +
+        (it.text != null
+          ? `<span class="ctx-icon-text">${it.text}</span>`
+          : `<svg class="ic"><use href="#${it.iconId}"/></svg>`) +
         (it.shortcut ? `<span class="ctx-icon-kbd">${it.shortcut}</span>` : '');
       b.addEventListener('click', () => {
         if (b.disabled) return;
@@ -1140,6 +1138,41 @@
     [major, minor].forEach(i => i.addEventListener('keydown', (e) => e.stopPropagation()));
     // Keep the menu open while clicking inside the input
     wrap.addEventListener('mousedown', (e) => e.stopPropagation());
+    return row;
+  }
+
+  // Inline single-line Zoom row: `[Zoom ][ − 100% + ]`
+  function ctxZoomRow() {
+    const row = document.createElement('div');
+    row.className = 'ctx-section-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'ctx-section ctx-inline-section';
+    lbl.textContent = 'Zoom';
+    row.appendChild(lbl);
+
+    const group = document.createElement('div');
+    group.className = 'ctx-presets ctx-zoom-presets';
+    const items = [
+      { text: '−', title: 'Zoom out (−)', onClick: () => zoomBy(1 / 1.2) },
+      { text: `${Math.round(state.view.zoom * 100)}%`, title: 'Reset view (0)', onClick: resetView },
+      { text: '+', title: 'Zoom in (+)', onClick: () => zoomBy(1.2) },
+    ];
+    items.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctx-preset';
+      b.textContent = it.text;
+      b.title = it.title;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        it.onClick();
+        // Live-refresh the % label without rebuilding the menu.
+        const pct = group.children[1];
+        if (pct) pct.textContent = `${Math.round(state.view.zoom * 100)}%`;
+      });
+      group.appendChild(b);
+    });
+    row.appendChild(group);
     return row;
   }
 
@@ -1423,9 +1456,7 @@
       { iconId: 'i-redo', title: 'Redo (Ctrl+Y)', shortcut: 'Redo', onClick: redo, disabled: state.future.length === 0 },
     ]));
     frag.appendChild(ctxSep());
-    frag.appendChild(ctxItem('Reset view', resetView, { shortcut: '0' }));
-    frag.appendChild(ctxItem('Zoom in', () => zoomBy(1.2), { shortcut: '+' }));
-    frag.appendChild(ctxItem('Zoom out', () => zoomBy(1 / 1.2), { shortcut: '-' }));
+    frag.appendChild(ctxZoomRow());
     frag.appendChild(ctxSep());
     frag.appendChild(ctxSection('Display'));
     ctxDisplayToggles(frag);
@@ -1536,9 +1567,9 @@
   document.getElementById('btn-redo').addEventListener('click', redo);
   document.getElementById('btn-delete').addEventListener('click', deleteSelected);
 
-  document.getElementById('btn-zoom-in').addEventListener('click', () => zoomBy(1.2));
-  document.getElementById('btn-zoom-out').addEventListener('click', () => zoomBy(1 / 1.2));
-  document.getElementById('btn-zoom-reset').addEventListener('click', resetView);
+  document.getElementById('btn-zoom-in-bar').addEventListener('click', () => zoomBy(1.2));
+  document.getElementById('btn-zoom-out-bar').addEventListener('click', () => zoomBy(1 / 1.2));
+  document.getElementById('btn-zoom-reset-bar').addEventListener('click', resetView);
 
   // Generic dropdown wiring shared by Settings / Export / etc.
   // Toggles `panel.hidden`, mirrors `.open` on the wrapper, syncs aria,
@@ -1578,7 +1609,7 @@
   }
 
   bindDropdown('settings-dropdown', 'btn-settings', 'settings-panel');
-  bindDropdown('export-dropdown', 'btn-export', 'export-panel');
+  bindDropdown('file-dropdown', 'btn-file', 'file-panel');
 
   document.getElementById('btn-new').addEventListener('click', async () => {
     const ok = await showModal({
@@ -1597,10 +1628,17 @@
     state.projectName = 'Untitled Layout';
     const pn = document.getElementById('project-name');
     if (pn) pn.value = state.projectName;
+    // Detach any bound file — "New" starts a fresh, unsaved layout.
+    currentFile.handle = null;
+    currentFile.name = null;
+    lastSavedFileSnapshot = null;
+    lastSavedAt = null;
+    clearPersistedHandle();
+    updateFileMeta();
     refreshAll();
   });
 
-  // Project name input \u2014 keep state in sync; mark dirty on change so Save lights up.
+  // Project name input \u2014 keep state in sync.
   (() => {
     const pn = document.getElementById('project-name');
     if (!pn) return;
@@ -1608,40 +1646,366 @@
     pn.addEventListener('input', () => {
       state.projectName = pn.value;
       scheduleAutosave();
-      updateSaveButton();
     });
-    // Blur normalizes blank to placeholder default
+    // Blur normalizes blank to placeholder default and renames the disk file
+    // to match (when one is bound and the browser supports handle.move()).
     pn.addEventListener('blur', () => {
       if (!pn.value.trim()) {
         state.projectName = 'Untitled Layout';
         pn.value = state.projectName;
-        scheduleAutosave();
-        updateSaveButton();
       }
+      scheduleAutosave();
+      renameBoundFileToProject();
+    });
+    pn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); pn.blur(); }
     });
   })();
-  document.getElementById('btn-save').addEventListener('click', () => {
+
+  // Rename the bound file on disk so its name matches the project title.
+  // Uses FileSystemFileHandle.move(newName) \u2014 Chromium 110+, same-directory
+  // rename only. No-op when there's no bound file or the API is missing.
+  async function renameBoundFileToProject() {
+    if (!currentFile.handle || typeof currentFile.handle.move !== 'function') return;
+    const m = currentFile.name && currentFile.name.match(/\.[^.]+$/);
+    const ext = m ? m[0].replace(/^\./, '') : 'json';
+    const desired = exportFilename(ext);
+    if (desired === currentFile.name) return;
     try {
-      localStorage.setItem(STORAGE_KEY, serialize());
-      lastSavedSnapshot = serialize();
-      updateSaveButton();
-      flash('Saved to browser');
+      const ok = await ensureWritePermission(currentFile.handle);
+      if (!ok) return;
+      await currentFile.handle.move(desired);
+      currentFile.name = desired;
+      persistHandle(currentFile.handle, desired, lastSavedAt || Date.now());
+      updateFileMeta();
+      flash(`Renamed to ${desired}`);
     } catch (err) {
+      console.warn('Could not rename file on disk', err);
+      flash('Could not rename file on disk');
+    }
+  }
+
+  // ---------- Open / Save to a file on the user's computer ----------
+  // Uses the File System Access API (Chromium) when available so subsequent
+  // Saves write back to the same file without re-prompting. On other
+  // browsers (Firefox/Safari) we fall back to a hidden <input type=file>
+  // for Open and a download for Save / Save As.
+  const hasFSAccess =
+    typeof window !== 'undefined' &&
+    'showOpenFilePicker' in window &&
+    'showSaveFilePicker' in window;
+
+  // Currently bound file (null until the user opens or saves one).
+  const currentFile = { handle: null, name: null };
+
+  const FILE_PICKER_TYPES = [{
+    description: 'Khaaka Layout (JSON)',
+    accept: { 'application/json': ['.json'] },
+  }];
+
+  // ---------- Persist the FileSystemFileHandle across reloads ----------
+  // Handles are structured-cloneable so we can stash them in IndexedDB.
+  // localStorage cannot hold them. On reload we restore { handle, name } but
+  // permission must be re-granted on a user gesture (browser security rule).
+  const HANDLE_DB = 'khaaka-fs';
+  const HANDLE_STORE = 'handles';
+  const HANDLE_KEY = 'currentFile';
+
+  function openHandleDb() {
+    return new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) return reject(new Error('IndexedDB unavailable'));
+      const req = indexedDB.open(HANDLE_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(HANDLE_STORE)) db.createObjectStore(HANDLE_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function persistHandle(handle, name, savedAt) {
+    if (!hasFSAccess) return;
+    try {
+      const db = await openHandleDb();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(HANDLE_STORE, 'readwrite');
+        tx.objectStore(HANDLE_STORE).put({ handle, name, savedAt: savedAt || Date.now() }, HANDLE_KEY);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch (err) {
+      console.warn('Could not persist file handle', err);
+    }
+  }
+  async function clearPersistedHandle() {
+    try {
+      const db = await openHandleDb();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(HANDLE_STORE, 'readwrite');
+        tx.objectStore(HANDLE_STORE).delete(HANDLE_KEY);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch { /* ignore */ }
+  }
+  async function loadPersistedHandle() {
+    if (!hasFSAccess) return null;
+    try {
+      const db = await openHandleDb();
+      const rec = await new Promise((res, rej) => {
+        const tx = db.transaction(HANDLE_STORE, 'readonly');
+        const r = tx.objectStore(HANDLE_STORE).get(HANDLE_KEY);
+        r.onsuccess = () => res(r.result || null);
+        r.onerror = () => rej(r.error);
+      });
+      db.close();
+      return rec;
+    } catch { return null; }
+  }
+
+  function updateFileMeta() {
+    const el = document.getElementById('file-name');
+    if (el) {
+      if (currentFile.name) {
+        if (lastSavedAt) {
+          el.innerHTML = `Saved at <span class="saved-at">${formatSavedAt(lastSavedAt)}</span>`;
+        } else {
+          el.textContent = 'Saved';
+        }
+        el.classList.add('has-file');
+        el.title = currentFile.name + (lastSavedAt ? ` — saved ${new Date(lastSavedAt).toLocaleString()}` : '');
+      } else {
+        el.textContent = 'Unsaved';
+        el.classList.remove('has-file');
+        el.title = 'No file opened — use File ▸ Save File As… to save to disk';
+      }
+      // Reflect dirty state (compare current snapshot to last file save)
+      const dirty = currentFile.name && lastSavedFileSnapshot !== serialize();
+      el.classList.toggle('dirty', !!dirty);
+    }
+    // Mirror the bound file's extension on the editable title (default .json)
+    const ext = document.getElementById('ext-suffix');
+    if (ext) {
+      const m = currentFile.name && currentFile.name.match(/\.[^.]+$/);
+      ext.textContent = m ? m[0].toLowerCase() : '.json';
+    }
+    if (typeof updateSaveButton === 'function') updateSaveButton();
+  }
+
+  // Snapshot of the layout the last time it was successfully written to a file.
+  let lastSavedFileSnapshot = null;
+  // Epoch millis of the last successful disk save (persisted with the handle).
+  let lastSavedAt = null;
+
+  // "Saved as … at <time> (<relative>)"
+  // Examples:
+  //   "10:42 AM (3 sec ago)"
+  //   "10:42 AM (5 min ago)"
+  //   "yesterday at 10:42 AM"
+  //   "May 10, 10:42 AM"
+  function formatSavedAt(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (sameDay) return `${time} (${formatRelative(now - d)})`;
+
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday =
+      d.getFullYear() === yesterday.getFullYear() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getDate() === yesterday.getDate();
+    if (isYesterday) return `yesterday at ${time}`;
+    const datePart = d.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+    });
+    return `${datePart}, ${time}`;
+  }
+
+  function formatRelative(diffMs) {
+    const sec = Math.max(0, Math.floor(diffMs / 1000));
+    if (sec < 60) return `${sec} sec ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} min ago`;
+    const hr = Math.floor(min / 60);
+    return `${hr} hr ago`;
+  }
+
+  // Refresh the relative label every second so "3 sec ago" stays live.
+  // Slows to 30s once it's older than a minute (no point updating per-second).
+  setInterval(() => {
+    if (!lastSavedAt || !currentFile.name) return;
+    const ageSec = (Date.now() - lastSavedAt) / 1000;
+    if (ageSec < 60) updateFileMeta();
+    else if (ageSec < 3600 && Math.floor(ageSec) % 30 === 0) updateFileMeta();
+  }, 1000);
+
+  async function ensureWritePermission(handle) {
+    if (!handle || typeof handle.queryPermission !== 'function') return true;
+    const opts = { mode: 'readwrite' };
+    let p = await handle.queryPermission(opts);
+    if (p === 'granted') return true;
+    p = await handle.requestPermission(opts);
+    return p === 'granted';
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ''));
+      r.onerror = () => reject(r.error || new Error('Read failed'));
+      r.readAsText(file);
+    });
+  }
+
+  async function openFromFile() {
+    try {
+      if (hasFSAccess) {
+        let handle;
+        try {
+          [handle] = await window.showOpenFilePicker({
+            types: FILE_PICKER_TYPES,
+            excludeAcceptAllOption: false,
+            multiple: false,
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // user cancelled
+          throw err;
+        }
+        const file = await handle.getFile();
+        const text = await file.text();
+        if (deserialize(text)) {
+          currentFile.handle = handle;
+          currentFile.name = file.name;
+          lastSavedFileSnapshot = serialize();
+          // Use the file's own modification time when available so the label
+          // reflects when it was last written, not when it was opened here.
+          lastSavedAt = (file.lastModified || Date.now());
+          persistHandle(handle, file.name, lastSavedAt);
+          updateFileMeta();
+          flash(`Opened ${file.name}`);
+        }
+      } else {
+        // Fallback: trigger the hidden file input
+        document.getElementById('file-open-fallback').click();
+      }
+    } catch (err) {
+      console.error(err);
+      flash('Open failed');
+    }
+  }
+
+  async function saveAsToFile() {
+    try {
+      if (hasFSAccess) {
+        let handle;
+        try {
+          handle = await window.showSaveFilePicker({
+            suggestedName: exportFilename('json'),
+            types: FILE_PICKER_TYPES,
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+          throw err;
+        }
+        const text = serialize();
+        const w = await handle.createWritable();
+        await w.write(text);
+        await w.close();
+        currentFile.handle = handle;
+        currentFile.name = handle.name || exportFilename('json');
+        lastSavedFileSnapshot = text;
+        lastSavedAt = Date.now();
+        persistHandle(handle, currentFile.name, lastSavedAt);
+        updateFileMeta();
+        flash(`Saved to ${currentFile.name}`);
+      } else {
+        // Fallback: just trigger a download
+        const name = exportFilename('json');
+        download(name, serialize(), 'application/json');
+        currentFile.handle = null;
+        currentFile.name = name;
+        lastSavedFileSnapshot = serialize();
+        lastSavedAt = Date.now();
+        updateFileMeta();
+        flash(`Downloaded ${name}`);
+      }
+    } catch (err) {
+      console.error(err);
       flash('Save failed');
     }
-  });
-  document.getElementById('btn-export-json').addEventListener('click', () => {
-    download(exportFilename('json'), serialize(), 'application/json');
-  });
-  document.getElementById('file-import').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { if (deserialize(reader.result)) flash('Imported'); };
-    reader.readAsText(file);
-    e.target.value = '';
-  });
+  }
+
+  async function saveToFile() {
+    // No bound file yet → behave as Save As.
+    if (!currentFile.handle) return saveAsToFile();
+    try {
+      const ok = await ensureWritePermission(currentFile.handle);
+      if (!ok) {
+        flash('Permission denied — choose a location');
+        return saveAsToFile();
+      }
+      const text = serialize();
+      const w = await currentFile.handle.createWritable();
+      await w.write(text);
+      await w.close();
+      lastSavedFileSnapshot = text;
+      lastSavedAt = Date.now();
+      persistHandle(currentFile.handle, currentFile.name, lastSavedAt);
+      updateFileMeta();
+      flash(`Saved to ${currentFile.name}`);
+    } catch (err) {
+      console.error(err);
+      // If the handle is no longer valid (file was moved/deleted) prompt for a new one.
+      if (err && (err.name === 'NotFoundError' || err.name === 'NotAllowedError')) {
+        currentFile.handle = null;
+        return saveAsToFile();
+      }
+      flash('Save failed');
+    }
+  }
+
+  document.getElementById('btn-open-file').addEventListener('click', openFromFile);
+  document.getElementById('btn-save-file').addEventListener('click', saveToFile);
+  document.getElementById('btn-save-as-file').addEventListener('click', saveAsToFile);
   document.getElementById('btn-export-png').addEventListener('click', exportPNG);
+  document.getElementById('btn-save').addEventListener('click', () => {
+    // No bound file → prompt user to choose a destination.
+    // Otherwise just write back to the existing file.
+    if (currentFile.handle || (!hasFSAccess && currentFile.name)) {
+      saveToFile();
+    } else {
+      saveAsToFile();
+    }
+  });
+
+  // Fallback open input (used on browsers without File System Access API)
+  document.getElementById('file-open-fallback').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await readFileAsText(file);
+      if (deserialize(text)) {
+        currentFile.handle = null;       // no handle on fallback
+        currentFile.name = file.name;
+        lastSavedFileSnapshot = serialize();
+        lastSavedAt = (file.lastModified || Date.now());
+        updateFileMeta();
+        flash(`Opened ${file.name}`);
+      }
+    } catch (err) {
+      flash('Open failed');
+    }
+  });
 
   // Canvas option inputs
   document.getElementById('opt-units').addEventListener('change', (e) => {
@@ -1738,7 +2102,19 @@
       const k = e.key.toLowerCase();
       if (k === 'z') { e.preventDefault(); undo(); return; }
       if (k === 'y') { e.preventDefault(); redo(); return; }
-      if (k === 's') { e.preventDefault(); document.getElementById('btn-save').click(); return; }
+      if (k === 'o') { e.preventDefault(); openFromFile(); return; }
+      if (k === 's') {
+        e.preventDefault();
+        if (e.shiftKey) { saveAsToFile(); return; }
+        // If a file is currently bound, Ctrl+S writes back to it; otherwise
+        // open the Save File dialog so the user can pick a destination.
+        if (currentFile.handle || (!hasFSAccess && currentFile.name)) {
+          saveToFile();
+        } else {
+          saveAsToFile();
+        }
+        return;
+      }
       if (k === 'n') { e.preventDefault(); document.getElementById('btn-new').click(); return; }
     }
     const map = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
@@ -2041,7 +2417,6 @@
     refreshSidePanel();
     draw();
     scheduleAutosave();
-    updateSaveButton();
   }
 
   // Hide the entire right-side panel when there are no objects (Layers card
@@ -2055,7 +2430,8 @@
 
   // ---------- Autosave (debounced) ----------
   // Saves the current layout to localStorage shortly after any state change,
-  // so the user never loses work if they close the tab.
+  // so the user never loses work if they close the tab. When a real file is
+  // bound (File ▸ Open / Save As), also write that file silently.
   let autosaveTimer = null;
   let suppressAutosave = false;   // true while loading, to avoid feedback loops
   function scheduleAutosave() {
@@ -2069,32 +2445,113 @@
       const snap = serialize();
       localStorage.setItem(STORAGE_KEY, snap);
       lastSavedSnapshot = snap;
-      updateSaveButton();
-      flash('Auto-saved');
     } catch (err) {
       // Storage may be full or unavailable (private mode, quota, etc.)
       flash('Auto-save failed');
     }
+    // Mirror to disk when a file handle is bound.
+    if (currentFile.handle) autosaveToDisk();
+    updateFileMeta();
+    updateSaveButton();
   }
 
-  // Track dirty state — disable Save and show "Saved" when nothing has changed
-  // since the last successful save.
-  let lastSavedSnapshot = null;
+  // Coalescing disk-writer: at most one in-flight write at a time. If new
+  // changes arrive mid-write, queue exactly one follow-up write.
+  let diskWriteInFlight = false;
+  let diskWritePending = false;
+  async function autosaveToDisk() {
+    if (!currentFile.handle) return;
+    if (diskWriteInFlight) { diskWritePending = true; return; }
+    diskWriteInFlight = true;
+    try {
+      const text = serialize();
+      const ok = await ensureWritePermission(currentFile.handle);
+      if (!ok) { diskWriteInFlight = false; return; }
+      const w = await currentFile.handle.createWritable();
+      await w.write(text);
+      await w.close();
+      lastSavedFileSnapshot = text;
+      lastSavedAt = Date.now();
+      persistHandle(currentFile.handle, currentFile.name, lastSavedAt);
+      updateFileMeta();
+      updateSaveButton();
+    } catch (err) {
+      console.warn('Disk autosave failed', err);
+      // If the handle vanished (file was moved/deleted), drop it so the user
+      // is prompted to choose a new location on the next manual save.
+      if (err && (err.name === 'NotFoundError' || err.name === 'NotAllowedError')) {
+        currentFile.handle = null;
+        currentFile.name = null;
+        lastSavedFileSnapshot = null;
+        lastSavedAt = null;
+        clearPersistedHandle();
+        updateFileMeta();
+        updateSaveButton();
+        flash('File no longer accessible — Save again to pick a new location');
+      }
+    } finally {
+      diskWriteInFlight = false;
+      if (diskWritePending) {
+        diskWritePending = false;
+        // Run the queued follow-up after current micro-task settles.
+        Promise.resolve().then(autosaveToDisk);
+      }
+    }
+  }
+
+  // Heartbeat: every second, re-write the bound file even if nothing changed.
+  // Touches the file's modification time and refreshes "Saved at <time>".
+  // The coalescing guard above ensures we never have overlapping writes.
+  setInterval(() => {
+    if (currentFile.handle && !suppressAutosave) autosaveToDisk();
+  }, 1000);
+
+  // Save-button state. Behaviour:
+  //  • No file bound  → enabled "Save" → opens Save As dialog
+  //  • File bound + on-disk in sync → disabled "Saved"
+  //  • File bound + autosave in flight → still shows "Saved" (silent autosave;
+  //    avoids flicker between Saved → Saving… → Saved on every edit)
   function updateSaveButton() {
     const btn = document.getElementById('btn-save');
     if (!btn) return;
     const labelEl = btn.querySelector('span');
-    const dirty = lastSavedSnapshot !== serialize();
-    btn.disabled = !dirty;
-    btn.classList.toggle('is-saved', !dirty);
-    if (labelEl) labelEl.textContent = dirty ? 'Save' : 'Saved';
-    btn.title = dirty ? 'Save to browser (Ctrl+S)' : 'All changes saved';
+    const hasFile = !!currentFile.handle || (!hasFSAccess && !!currentFile.name);
+    const inSync = hasFile && lastSavedFileSnapshot === serialize();
+    const saving = diskWriteInFlight || diskWritePending;
+
+    let label, disabled, title;
+    if (!hasFile) {
+      label = 'Save'; disabled = false; title = 'Save to file (Ctrl+S)';
+    } else if (inSync || saving) {
+      // Treat in-flight autosave as already saved — the bytes are on the way
+      // and the user shouldn't see a busy state for routine edits.
+      label = 'Saved'; disabled = true; title = 'All changes saved to file';
+    } else {
+      label = 'Save'; disabled = false; title = 'Save to file (Ctrl+S)';
+    }
+    btn.disabled = disabled;
+    btn.classList.toggle('is-saved', disabled && hasFile);
+    if (labelEl) labelEl.textContent = label;
+    btn.title = title;
   }
+
+  // Track snapshot of the last successful localStorage save (used by
+  // updateFileMeta dirty comparison).
+  let lastSavedSnapshot = null;
   // Best-effort flush before leaving the page
-  window.addEventListener('beforeunload', () => {
+  window.addEventListener('beforeunload', (e) => {
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);
       try { localStorage.setItem(STORAGE_KEY, serialize()); } catch {}
+      // Disk write is async and may not finish before unload; warn the user
+      // if there are unsaved changes to a bound file.
+      if (currentFile.handle && lastSavedFileSnapshot !== serialize()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    } else if (currentFile.handle && lastSavedFileSnapshot !== serialize()) {
+      e.preventDefault();
+      e.returnValue = '';
     }
   });
 
@@ -2181,17 +2638,13 @@
     URL.revokeObjectURL(a.href);
   }
 
-  // Build a safe export filename from the project name + a local timestamp.
-  // Returns e.g. "My Plot_2026-05-10_14-32-08.json".
+  // Build a safe export filename from the project name.
+  // Returns e.g. "My Plot.json". The user can rename in the save dialog.
   function exportFilename(ext) {
     const raw = (state.projectName || 'Untitled Layout').trim() || 'Untitled Layout';
     // Strip characters that are invalid in filenames on Windows/macOS/Linux.
     const safe = raw.replace(/[\\/:*?"<>|\x00-\x1f]/g, '').slice(0, 60).trim() || 'Untitled Layout';
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_` +
-                  `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
-    return `${safe}_${stamp}.${ext}`;
+    return `${safe}.${ext}`;
   }
   function exportPNG() {
     // Render a clean copy without selection halo or status overlays.
@@ -2486,9 +2939,32 @@
     seedSampleLayout();
     refreshAll();
   }
-  // Treat the freshly initialized state as "saved" so the Save button starts disabled.
+  // Treat the freshly initialized state as "saved" so the file-meta dirty dot starts clean.
   lastSavedSnapshot = serialize();
+  updateFileMeta();
   updateSaveButton();
+
+  // Restore any previously bound file handle (FS Access API only). The
+  // handle round-trips through IndexedDB. Permission is NOT auto-granted on
+  // reload — we just re-attach the name so the UI shows "Saved as …" and
+  // mark the in-memory state as in-sync with the file. The first save click
+  // (a user gesture) re-prompts for write permission via ensureWritePermission.
+  (async () => {
+    try {
+      const rec = await loadPersistedHandle();
+      if (!rec || !rec.handle) return;
+      currentFile.handle = rec.handle;
+      currentFile.name = rec.name || rec.handle.name || 'Untitled.json';
+      lastSavedAt = rec.savedAt || null;
+      // Treat localStorage's snapshot as the file's last known content. If the
+      // user hasn't edited anything since closing, the dirty dot stays off.
+      lastSavedFileSnapshot = serialize();
+      updateFileMeta();
+      updateSaveButton();
+    } catch (err) {
+      console.warn('Could not restore file handle', err);
+    }
+  })();
 
   // Polished default plot \u2014 a small 2-bedroom apartment using only the
   // palette colors. Demonstrates rooms, walls, doors, windows, text and a
@@ -2514,7 +2990,20 @@
     const wallStroke = '#4a2e1c';
 
     state.objects = [
-      // \u2014\u2014 Floor / zones \u2014\u2014
+      // —— Parking (outside, to the right) ——
+      makeObject('room', {
+        x: W + 0.4, y: 0, w: 4, h: H,
+        label: 'Parking',
+        fill: '#f5efe6',
+        stroke: '#94a3b8',
+        strokeWidth: 2,
+      }),
+      // Parking perimeter walls (open on the side facing the house)
+      makeObject('wall', { x1: W + 0.4, y1: 0,    x2: W + 4.4, y2: 0,    thickness: T, stroke: wallStroke }), // top
+      makeObject('wall', { x1: W + 4.4, y1: 0,    x2: W + 4.4, y2: H,    thickness: T, stroke: wallStroke }), // right
+      makeObject('wall', { x1: W + 4.4, y1: H,    x2: W + 0.4, y2: H,    thickness: T, stroke: wallStroke }), // bottom
+
+      // —— Floor / zones ——
       makeObject('room', { x: 0,    y: 0,    w: 5.5, h: 4.2, label: 'Living Room', fill: roomFill.living,  stroke, strokeWidth: 2 }),
       makeObject('room', { x: 5.5,  y: 0,    w: 4.5, h: 2.5, label: 'Kitchen',     fill: roomFill.kitchen, stroke, strokeWidth: 2 }),
       makeObject('room', { x: 5.5,  y: 2.5,  w: 4.5, h: 1.7, label: 'Dining',      fill: roomFill.dining,  stroke, strokeWidth: 2 }),
