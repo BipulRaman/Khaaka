@@ -2078,6 +2078,8 @@
       ext.textContent = m ? m[0].toLowerCase() : '.json';
     }
     if (typeof updateSaveButton === 'function') updateSaveButton();
+    // Keep tab dirty dots perfectly synced with the app-bar indicator.
+    if (typeof renderTabStrip === 'function') renderTabStrip();
   }
 
   // Snapshot of the layout the last time it was successfully written to a file.
@@ -2212,10 +2214,16 @@
         await w.close();
         currentFile.handle = handle;
         currentFile.name = handle.name || exportFilename('json');
-        lastSavedFileSnapshot = text;
+        // The user may have typed a different name in the Save dialog —
+        // sync the editable project title and tab label to match.
+        syncProjectNameToFile(currentFile.name);
+        // Re-serialize so the snapshot reflects the (possibly new) projectName.
+        lastSavedFileSnapshot = serialize();
         lastSavedAt = Date.now();
         persistHandle(handle, currentFile.name, lastSavedAt, activeTabId);
         updateFileMeta();
+        renderTabStrip();
+        persistTabs();
         flash(`Saved to ${currentFile.name}`);
       } else {
         // Fallback: just trigger a download
@@ -2223,9 +2231,12 @@
         download(name, serialize(), 'application/json');
         currentFile.handle = null;
         currentFile.name = name;
+        syncProjectNameToFile(name);
         lastSavedFileSnapshot = serialize();
         lastSavedAt = Date.now();
         updateFileMeta();
+        renderTabStrip();
+        persistTabs();
         flash(`Downloaded ${name}`);
       }
     } catch (err) {
@@ -2876,19 +2887,9 @@
 
   // ---------- Persistence ----------
   function serialize() {
-    return JSON.stringify({
-      version: 1,
-      pxPerMeter: state.pxPerMeter,
-      pxPerBox: state.pxPerBox,
-      grid: state.grid,
-      showDims: state.showDims,
-      units: state.units,
-      defaultWallThickness: state.defaultWallThickness,
-      projectName: state.projectName,
-      view: { x: state.view.x, y: state.view.y, zoom: state.view.zoom },
-      objects: state.objects,
-      nextId: state.nextId,
-    }, null, 2);
+    // Delegate to the per-tab serializer so app-bar dirty and tab dirty
+    // compare against byte-identical snapshots.
+    return serializeState(state);
   }
   function deserialize(s) {
     try {
