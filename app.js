@@ -98,6 +98,67 @@
     return `${ft}'-${inStr}`;
   }
 
+  // Format an area (m²) in the active units.
+  // Imperial: "96 sq ft" (rounded to nearest 1 sq ft, or 1 decimal under 1 sq ft).
+  // Metric:   "8.92 m²" (2 decimals up to 100 m², then 1 decimal).
+  function fmtArea(m2) {
+    if (state.units === 'ft') {
+      const sqft = m2 / (M_PER_FT * M_PER_FT);
+      const v = sqft >= 1 ? Math.round(sqft) : Math.round(sqft * 10) / 10;
+      return `${v.toLocaleString()} sq ft`;
+    }
+    const v = m2 < 100 ? Math.round(m2 * 100) / 100 : Math.round(m2 * 10) / 10;
+    return `${v} m\u00b2`;
+  }
+
+  // Intersection area of two axis-aligned rectangles (0 if disjoint).
+  function rectIntersectArea(a, b) {
+    const x = Math.max(a.x, b.x);
+    const y = Math.max(a.y, b.y);
+    const x2 = Math.min(a.x + a.w, b.x + b.w);
+    const y2 = Math.min(a.y + a.h, b.y + b.h);
+    const w = x2 - x, h = y2 - y;
+    return (w > 0 && h > 0) ? w * h : 0;
+  }
+
+  // Visible area of a room: its own rectangle minus any portions covered by
+  // rooms drawn ON TOP of it (later in state.objects = higher z-order).
+  // This matches what the user sees: the perimeter at the click point.
+  // Sum of every room's net area = union area (no double counting).
+  function roomNetArea(room) {
+    let area = (room.w || 0) * (room.h || 0);
+    const idx = state.objects.indexOf(room);
+    for (let i = idx + 1; i < state.objects.length; i++) {
+      const o = state.objects[i];
+      if (o.type !== 'room') continue;
+      area -= rectIntersectArea(room, o);
+    }
+    return Math.max(0, area);
+  }
+
+  // Smart selection area for an arbitrary set of rooms.
+  // Same z-order model as roomNetArea but restricted to the selection so the
+  // user only counts what they explicitly picked.
+  function computeSelectionArea(rooms) {
+    if (!rooms || rooms.length === 0) return { area: 0, lines: [] };
+    const sorted = [...rooms].sort(
+      (a, b) => state.objects.indexOf(a) - state.objects.indexOf(b)
+    );
+    const lines = [];
+    let total = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
+      let area = (r.w || 0) * (r.h || 0);
+      for (let j = i + 1; j < sorted.length; j++) {
+        area -= rectIntersectArea(r, sorted[j]);
+      }
+      area = Math.max(0, area);
+      total += area;
+      lines.push({ label: r.label || 'Room', area });
+    }
+    return { area: total, lines };
+  }
+
   // Format meters as a value suitable for an editable input field.
   // Meters: numeric like "3.25". Feet/inches: a string like `12'-3"`.
   function fmtLenInput(meters) {
@@ -489,12 +550,37 @@
       ctx.fillRect(p.x, p.y, o.w * s, o.h * s);
       ctx.strokeRect(p.x, p.y, o.w * s, o.h * s);
 
+      const cx = p.x + (o.w * s) / 2;
+      const cy = p.y + (o.h * s) / 2;
       if (o.label) {
         ctx.fillStyle = '#1c2433';
         ctx.font = '600 13px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(o.label, p.x + (o.w * s) / 2, p.y + (o.h * s) / 2);
+        ctx.fillText(o.label, cx, cy);
+      }
+      // Per-room area label (opt-in via right-click). Position is stored as
+      // fractional offset (0..1) inside the room so it follows on move/resize.
+      if (o.showArea) {
+        // Net area = own rectangle minus overlapping rooms drawn on top of
+        // it. Matches "perimeter visible at click point" intuition.
+        const text = fmtArea(roomNetArea(o));
+        const fx = (o.areaPos && typeof o.areaPos.fx === 'number') ? o.areaPos.fx : 0.5;
+        const fy = (o.areaPos && typeof o.areaPos.fy === 'number') ? o.areaPos.fy : (o.label ? 0.66 : 0.5);
+        const lx = p.x + fx * o.w * s;
+        const ly = p.y + fy * o.h * s;
+        ctx.fillStyle = '#475569';
+        ctx.font = '500 11px "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, lx, ly);
+        // Stash hit rect (screen space) for the mouse handler.
+        const m = ctx.measureText(text);
+        const halfW = m.width / 2 + 4;
+        const halfH = 8;
+        o._areaRect = { cx: lx, cy: ly, halfW, halfH };
+      } else {
+        o._areaRect = null;
       }
     } else if (o.type === 'wall') {
       const a = worldToScreen(o.x1, o.y1);
@@ -761,11 +847,49 @@
     return null;
   }
 
+  // Hit-test a per-room area label (drawn inside the room). Returns the
+  // room object or null. Top-most first so stacked rooms behave naturally.
+  function hitAreaLabel(sx, sy) {
+    for (let i = state.objects.length - 1; i >= 0; i--) {
+      const o = state.objects[i];
+      if (o.type !== 'room' || !o.showArea || !o._areaRect) continue;
+      const r = o._areaRect;
+      if (Math.abs(sx - r.cx) <= r.halfW && Math.abs(sy - r.cy) <= r.halfH) return o;
+    }
+    return null;
+  }
+
   // ---------- Status / Hint ----------
   function setHint(msg) { hint.textContent = msg; }
   function updateStatus() {
     const pct = document.getElementById('btn-zoom-reset-bar');
     if (pct) pct.textContent = `${Math.round(state.view.zoom * 100)}%`;
+    const totalEl = document.getElementById('total-area');
+    if (totalEl) {
+      let total = 0;
+      for (const o of state.objects) {
+        if (o.type === 'room') total += roomNetArea(o);
+      }
+      totalEl.textContent = total > 0 ? `Total: ${fmtArea(total)}` : '';
+    }
+    // Selection-area badge: shown only when 2+ rooms are selected.
+    // Uses z-order net so overlap is counted once and matches the visible
+    // perimeter at each click point.
+    const selEl = document.getElementById('sel-area');
+    if (selEl) {
+      ensureSelection();
+      const selRooms = state.objects.filter(o => o.type === 'room' && state.selectedIds.has(o.id));
+      if (selRooms.length < 2) {
+        selEl.textContent = '';
+        selEl.title = '';
+      } else {
+        const { area, lines } = computeSelectionArea(selRooms);
+        selEl.textContent = `Sel ${selRooms.length}: ${fmtArea(area)}`;
+        const tip = lines.map(ln => `${ln.label}: ${fmtArea(ln.area)}`).join('\n')
+          + `\n────────────\nNet: ${fmtArea(area)}`;
+        selEl.title = tip;
+      }
+    }
   }
 
   // ---------- Tools / Interaction ----------
@@ -825,6 +949,24 @@
         }
         setSelection([dimHit.id]);
         refreshAll();
+        return;
+      }
+    }
+
+    // Click on a per-room area label → start dragging it within the room.
+    if (state.tool === 'select') {
+      const areaHit = hitAreaLabel(sx, sy);
+      if (areaHit && !areaHit.locked) {
+        pushHistory();
+        setSelection([areaHit.id]);
+        drag = {
+          mode: 'area-label',
+          target: areaHit,
+          startWorld: w,
+          original: { ...(areaHit.areaPos || { fx: 0.5, fy: 0.5 }) },
+        };
+        canvas.style.cursor = 'grabbing';
+        refreshProps(); refreshLayers(); draw();
         return;
       }
     }
@@ -956,10 +1098,12 @@
     const sw = { x: snap(w.x), y: snap(w.y) };
 
     if (!drag) {
-      // Idle hover: show pointer cursor over clickable dimension labels.
-      if (state.showDims && state.tool === 'select' && hitDimensionLabel(sx, sy)) {
+      // Idle hover: show pointer cursor over clickable labels.
+      if (state.tool === 'select' && hitAreaLabel(sx, sy)) {
+        canvas.style.cursor = 'grab';
+      } else if (state.showDims && state.tool === 'select' && hitDimensionLabel(sx, sy)) {
         canvas.style.cursor = 'pointer';
-      } else if (canvas.style.cursor === 'pointer') {
+      } else if (canvas.style.cursor === 'pointer' || canvas.style.cursor === 'grab') {
         canvas.style.cursor = 'default';
       }
       return;
@@ -1001,6 +1145,16 @@
 
     if (drag.mode === 'marquee') {
       drag.endWorld = w;
+      draw();
+      return;
+    }
+
+    if (drag.mode === 'area-label') {
+      const o = drag.target;
+      if (!o) return;
+      const fx = Math.max(0.05, Math.min(0.95, (w.x - o.x) / o.w));
+      const fy = Math.max(0.05, Math.min(0.95, (w.y - o.y) / o.h));
+      o.areaPos = { fx, fy };
       draw();
       return;
     }
@@ -1605,6 +1759,14 @@
         refreshAll();
         scheduleAutosave();
       }, { disabled: !!o.locked }));
+      // Per-room area label toggle. Drag the label inside the room to move it.
+      frag.appendChild(ctxItem(o.showArea ? 'Hide area' : 'Show area', () => {
+        pushHistory();
+        o.showArea = !o.showArea;
+        if (o.showArea && !o.areaPos) o.areaPos = { fx: 0.5, fy: 0.5 };
+        refreshAll();
+        scheduleAutosave();
+      }));
     }
 
     // Inline length editors (Width / Height / Thickness) — only for the

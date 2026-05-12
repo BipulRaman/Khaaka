@@ -592,6 +592,26 @@ button { font-family: inherit; }
   text-align: center;
   font-weight: 500;
 }
+.zoom-bar .total-area {
+  padding: 4px 10px 4px 8px;
+  margin-right: 4px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font: 500 11px "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.zoom-bar .total-area:empty { display: none; }
+.zoom-bar .sel-area {
+  padding: 4px 10px 4px 8px;
+  margin-right: 4px;
+  border-right: 1px solid var(--border);
+  color: var(--accent, #4a76f5);
+  font: 600 11px "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.zoom-bar .sel-area:empty { display: none; }
 .zoom-bar .zoom-btn:hover,
 .zoom-bar .zoom-pct:hover {
   background: var(--accent-soft);
