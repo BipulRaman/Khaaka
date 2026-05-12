@@ -240,16 +240,29 @@
   }
 
   // Object types:
-  // - room:   {x, y, w, h}
-  // - wall:   {x1, y1, x2, y2, thickness}
-  // - door:   {x, y, w, rot}
-  // - window: {x, y, w, rot}
-  // - text:   {x, y, text, size}
+  // - room:    {x, y, w, h}
+  // - polygon: {points: [{x,y}, ...], closed}
+  // - wall:    {x1, y1, x2, y2, thickness}
+  // - door:    {x, y, w, rot}
+  // - window:  {x, y, w, rot}
+  // - text:    {x, y, text, size}
 
   function getBounds(o) {
     switch (o.type) {
       case 'room':
         return { x: o.x, y: o.y, w: o.w, h: o.h };
+      case 'polygon': {
+        const pts = o.points || [];
+        if (pts.length === 0) return { x: 0, y: 0, w: 0.1, h: 0.1 };
+        let xMin = pts[0].x, xMax = pts[0].x, yMin = pts[0].y, yMax = pts[0].y;
+        for (const p of pts) {
+          if (p.x < xMin) xMin = p.x;
+          if (p.x > xMax) xMax = p.x;
+          if (p.y < yMin) yMin = p.y;
+          if (p.y > yMax) yMax = p.y;
+        }
+        return { x: xMin, y: yMin, w: Math.max(0.1, xMax - xMin), h: Math.max(0.1, yMax - yMin) };
+      }
       case 'wall':
       case 'measure': {
         const x = Math.min(o.x1, o.x2), y = Math.min(o.y1, o.y2);
@@ -281,6 +294,14 @@
     switch (o.type) {
       case 'room':
         o.x = b.x; o.y = b.y; o.w = Math.max(0.1, b.w); o.h = Math.max(0.1, b.h); break;
+      case 'polygon': {
+        // Translate every vertex so the bbox top-left lands at b.x,b.y.
+        const cur = getBounds(o);
+        const dx = b.x - cur.x;
+        const dy = b.y - cur.y;
+        if (dx || dy) for (const p of o.points) { p.x += dx; p.y += dy; }
+        break;
+      }
       case 'wall':
       case 'measure': {
         const dx = b.x - Math.min(o.x1, o.x2);
@@ -307,6 +328,12 @@
     // top-most first
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
+      // Polygons: precise point-in-polygon (closed only) so users can't
+      // grab the shape through holes outside its body.
+      if (o.type === 'polygon' && o.closed && (o.points || []).length >= 3) {
+        if (pointInPolygon(wx, wy, o.points)) return o;
+        continue;
+      }
       const b = getBounds(o);
       const pad = 0.15; // meters tolerance for thin objects
       if (wx >= b.x - pad && wx <= b.x + b.w + pad &&
@@ -315,6 +342,19 @@
       }
     }
     return null;
+  }
+
+  // Standard ray-casting point-in-polygon test.
+  function pointInPolygon(x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i].x, yi = pts[i].y;
+      const xj = pts[j].x, yj = pts[j].y;
+      const intersect = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   // ---------- Selection helpers (multi-select) ----------
@@ -492,6 +532,40 @@
       ctx.restore();
     }
 
+    // Polygon draft preview: rubber-band line + closing-vertex halo
+    if (drag && drag.mode === 'polygon-draft' && drag.obj) {
+      const pts = drag.obj.points || [];
+      if (pts.length > 0 && drag.hover) {
+        const last = worldToScreen(pts[pts.length - 1].x, pts[pts.length - 1].y);
+        const cur  = worldToScreen(drag.hover.x, drag.hover.y);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(74, 118, 245, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(cur.x, cur.y); ctx.stroke();
+        // Closing hint when hovering near the first vertex
+        if (pts.length >= 3) {
+          const first = pts[0];
+          const tol = 10 / (state.pxPerMeter * state.view.zoom);
+          if (Math.hypot(first.x - drag.hover.x, first.y - drag.hover.y) < tol) {
+            const fp = worldToScreen(first.x, first.y);
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(74, 118, 245, 0.30)';
+            ctx.beginPath(); ctx.arc(fp.x, fp.y, 7, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+      // Vertex dots
+      ctx.save();
+      ctx.fillStyle = '#5b8cff';
+      for (const p of pts) {
+        const sp = worldToScreen(p.x, p.y);
+        ctx.fillRect(sp.x - 3, sp.y - 3, 6, 6);
+      }
+      ctx.restore();
+    }
+
     updateStatus();
   }
 
@@ -581,6 +655,62 @@
         o._areaRect = { cx: lx, cy: ly, halfW, halfH };
       } else {
         o._areaRect = null;
+      }
+    } else if (o.type === 'polygon') {
+      const pts = o.points || [];
+      if (pts.length < 2) {
+        // While drafting (single vertex) just draw a small dot.
+        if (pts.length === 1) {
+          const p = worldToScreen(pts[0].x, pts[0].y);
+          ctx.fillStyle = o.stroke || '#1f3a8a';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      } else {
+        ctx.beginPath();
+        const first = worldToScreen(pts[0].x, pts[0].y);
+        ctx.moveTo(first.x, first.y);
+        for (let i = 1; i < pts.length; i++) {
+          const sp = worldToScreen(pts[i].x, pts[i].y);
+          ctx.lineTo(sp.x, sp.y);
+        }
+        // Closed: fill + closing line. Open (still drafting): stroke only.
+        if (o.closed) {
+          ctx.closePath();
+          ctx.fillStyle = o.fill || '#e8f0ff';
+          ctx.fill();
+        }
+        ctx.strokeStyle = o.stroke || '#1f3a8a';
+        ctx.lineWidth = o.strokeWidth || 2;
+        ctx.stroke();
+        // Optional label at centroid
+        const c = (o.closed && (o.label || o.showArea)) ? polygonCentroid(pts) : null;
+        if (o.closed && o.label) {
+          const sp = worldToScreen(c.x, c.y);
+          ctx.fillStyle = '#1c2433';
+          ctx.font = '600 13px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(o.label, sp.x, sp.y);
+        }
+        // Per-polygon area label (opt-in via right-click).
+        // Position is stored in absolute world coords so it stays put under
+        // vertex reshapes; defaults to centroid when first turned on.
+        if (o.closed && o.showArea) {
+          const text = fmtArea(polygonArea(pts));
+          const ax = (o.areaPos && typeof o.areaPos.x === 'number') ? o.areaPos.x : c.x;
+          const ay = (o.areaPos && typeof o.areaPos.y === 'number') ? o.areaPos.y
+            : (o.label ? c.y + 0.25 : c.y);
+          const sp = worldToScreen(ax, ay);
+          ctx.fillStyle = '#475569';
+          ctx.font = '500 11px "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, sp.x, sp.y);
+          const m = ctx.measureText(text);
+          o._areaRect = { cx: sp.x, cy: sp.y, halfW: m.width / 2 + 4, halfH: 8 };
+        } else {
+          o._areaRect = null;
+        }
       }
     } else if (o.type === 'wall') {
       const a = worldToScreen(o.x1, o.y1);
@@ -801,6 +931,10 @@
         { id: 'se', x: o.x + o.w,   y: o.y + o.h },
       ];
     }
+    if (o.type === 'polygon') {
+      // One handle per vertex (id = "v<index>"). Drag to reshape.
+      return (o.points || []).map((p, i) => ({ id: 'v' + i, x: p.x, y: p.y }));
+    }
     if (o.type === 'wall' || o.type === 'measure') {
       return [
         { id: 'p1', x: o.x1, y: o.y1 },
@@ -852,7 +986,7 @@
   function hitAreaLabel(sx, sy) {
     for (let i = state.objects.length - 1; i >= 0; i--) {
       const o = state.objects[i];
-      if (o.type !== 'room' || !o.showArea || !o._areaRect) continue;
+      if ((o.type !== 'room' && o.type !== 'polygon') || !o.showArea || !o._areaRect) continue;
       const r = o._areaRect;
       if (Math.abs(sx - r.cx) <= r.halfW && Math.abs(sy - r.cy) <= r.halfH) return o;
     }
@@ -869,6 +1003,7 @@
       let total = 0;
       for (const o of state.objects) {
         if (o.type === 'room') total += roomNetArea(o);
+        else if (o.type === 'polygon' && o.closed) total += polygonArea(o.points);
       }
       totalEl.textContent = total > 0 ? `Total: ${fmtArea(total)}` : '';
     }
@@ -959,11 +1094,16 @@
       if (areaHit && !areaHit.locked) {
         pushHistory();
         setSelection([areaHit.id]);
+        // Default origin depends on shape type (room uses fractional, polygon
+        // uses absolute world coords).
+        const defaultPos = areaHit.type === 'polygon'
+          ? polygonCentroid(areaHit.points || [])
+          : { fx: 0.5, fy: 0.5 };
         drag = {
           mode: 'area-label',
           target: areaHit,
           startWorld: w,
-          original: { ...(areaHit.areaPos || { fx: 0.5, fy: 0.5 }) },
+          original: { ...(areaHit.areaPos || defaultPos) },
         };
         canvas.style.cursor = 'grabbing';
         refreshProps(); refreshLayers(); draw();
@@ -1030,6 +1170,36 @@
     }
 
     // Creation tools
+    // Polygon: stateful drafting (no drag). Each click drops a vertex; dbl-click,
+    // Enter, or click on the first vertex closes the shape.
+    if (state.tool === 'polygon') {
+      const v = { x: sw.x, y: sw.y };
+      if (!drag || drag.mode !== 'polygon-draft') {
+        pushHistory();
+        const obj = makeObject('polygon', { points: [v], closed: false });
+        state.objects.push(obj);
+        setSelection([obj.id]);
+        drag = { mode: 'polygon-draft', obj, hover: { x: sw.x, y: sw.y } };
+        canvas.style.cursor = 'crosshair';
+        draw();
+        flash('Click to drop vertices, double-click or Enter to finish');
+        return;
+      }
+      const o = drag.obj;
+      // Close if clicking on the first vertex (within ~10px screen)
+      if (o.points.length >= 3) {
+        const first = o.points[0];
+        const tol = 10 / (state.pxPerMeter * state.view.zoom);
+        if (Math.hypot(first.x - v.x, first.y - v.y) < tol) {
+          finalizePolygonDraft();
+          return;
+        }
+      }
+      o.points.push(v);
+      draw();
+      return;
+    }
+
     pushHistory();
     let obj;
     if (state.tool === 'room') {
@@ -1116,6 +1286,12 @@
       return;
     }
 
+    if (drag.mode === 'polygon-draft') {
+      drag.hover = { x: sw.x, y: sw.y };
+      draw();
+      return;
+    }
+
     if (drag.mode === 'create') {
       const o = drag.obj;
       // Measure stays unsnapped so it can show precise non-whole numbers
@@ -1152,9 +1328,19 @@
     if (drag.mode === 'area-label') {
       const o = drag.target;
       if (!o) return;
-      const fx = Math.max(0.05, Math.min(0.95, (w.x - o.x) / o.w));
-      const fy = Math.max(0.05, Math.min(0.95, (w.y - o.y) / o.h));
-      o.areaPos = { fx, fy };
+      if (o.type === 'polygon') {
+        // Free position in world coords; clamp to polygon AABB so it
+        // doesn't drift far away.
+        const b = getBounds(o);
+        const x = Math.max(b.x, Math.min(b.x + b.w, w.x));
+        const y = Math.max(b.y, Math.min(b.y + b.h, w.y));
+        o.areaPos = { x, y };
+      } else {
+        // Room: fractional offset within its rectangle.
+        const fx = Math.max(0.05, Math.min(0.95, (w.x - o.x) / o.w));
+        const fy = Math.max(0.05, Math.min(0.95, (w.y - o.y) / o.h));
+        o.areaPos = { fx, fy };
+      }
       draw();
       return;
     }
@@ -1171,6 +1357,8 @@
           o.x2 = orig.x2 + dx; o.y2 = orig.y2 + dy;
         } else if (o.type === 'room') {
           o.x = orig.x + dx; o.y = orig.y + dy;
+        } else if (o.type === 'polygon') {
+          o.points = orig.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
         } else {
           o.x = orig.x + dx; o.y = orig.y + dy;
         }
@@ -1190,6 +1378,8 @@
       else if (o.type === 'wall' || o.type === 'measure') {
         o.x1 = orig.x1 + dx; o.y1 = orig.y1 + dy;
         o.x2 = orig.x2 + dx; o.y2 = orig.y2 + dy;
+      } else if (o.type === 'polygon') {
+        o.points = orig.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
       } else { o.x = orig.x + dx; o.y = orig.y + dy; }
       draw();
       refreshProps();
@@ -1220,6 +1410,11 @@
         const dy = sw.y - orig.y;
         o.w = Math.max(0.3, Math.sqrt(dx * dx + dy * dy));
         o.rot = Math.atan2(dy, dx) * 180 / Math.PI;
+      } else if (o.type === 'polygon' && drag.handle && drag.handle.startsWith('v')) {
+        const idx = parseInt(drag.handle.slice(1), 10);
+        if (!isNaN(idx) && o.points[idx]) {
+          o.points[idx] = { x: sw.x, y: sw.y };
+        }
       }
       draw();
       refreshProps();
@@ -1264,9 +1459,22 @@
       // restores the position before the drag started, not mid-drag.
       // (pushHistory is already called for create/clipboard ops.)
     }
+    // Polygon drafting is stateful across many clicks — keep the drag alive.
+    if (drag && drag.mode === 'polygon-draft') {
+      refreshLayers();
+      return;
+    }
     drag = null;
     canvas.style.cursor = 'default';
     refreshAll();
+  });
+
+  // Double-click finalizes the polygon being drafted.
+  canvas.addEventListener('dblclick', (e) => {
+    if (drag && drag.mode === 'polygon-draft') {
+      e.preventDefault();
+      finalizePolygonDraft();
+    }
   });
 
   // Programmatically activate the Select tool (also updates toolbar state).
@@ -1275,6 +1483,34 @@
     const btn = document.querySelector('.tool[data-tool="select"]');
     if (btn) btn.click();
     else state.tool = 'select';
+  }
+
+  // End an in-progress polygon draft: close it if there are enough vertices,
+  // otherwise discard. Always switches back to Select.
+  function finalizePolygonDraft() {
+    if (!drag || drag.mode !== 'polygon-draft') return;
+    const o = drag.obj;
+    if (!o || (o.points || []).length < 3) {
+      // Not enough vertices for a real shape — discard
+      state.objects = state.objects.filter(x => x !== o);
+      clearSelection();
+    } else {
+      o.closed = true;
+    }
+    drag = null;
+    canvas.style.cursor = 'default';
+    switchToSelectTool();
+    refreshAll();
+    scheduleAutosave();
+  }
+  function cancelPolygonDraft() {
+    if (!drag || drag.mode !== 'polygon-draft') return;
+    state.objects = state.objects.filter(x => x !== drag.obj);
+    clearSelection();
+    drag = null;
+    canvas.style.cursor = 'default';
+    switchToSelectTool();
+    refreshAll();
   }
 
   // Create 4 wall objects along a room's edges (top, right, bottom, left).
@@ -1298,6 +1534,61 @@
       created.push(w);
     }
     return created;
+  }
+
+  // Add one wall per edge of a polygon (closed). Returns the new wall objects.
+  function addWallsForPolygon(poly) {
+    const pts = poly.points || [];
+    if (pts.length < 2) return [];
+    const t = state.defaultWallThickness;
+    const stroke = '#4a2e1c';
+    const created = [];
+    const edges = poly.closed ? pts.length : pts.length - 1;
+    for (let i = 0; i < edges; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      const w = makeObject('wall', {
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        thickness: t, stroke,
+      });
+      state.objects.push(w);
+      created.push(w);
+    }
+    return created;
+  }
+
+  // Shoelace signed area; absolute value gives the polygon's enclosed area.
+  function polygonArea(pts) {
+    if (!pts || pts.length < 3) return 0;
+    let s = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      s += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+    }
+    return Math.abs(s) * 0.5;
+  }
+  // Area-weighted centroid (handles non-convex shapes correctly).
+  // Falls back to bbox center for degenerate polygons.
+  function polygonCentroid(pts) {
+    if (!pts || pts.length < 3) {
+      let x = 0, y = 0;
+      for (const p of pts || []) { x += p.x; y += p.y; }
+      return { x: x / Math.max(1, (pts || []).length), y: y / Math.max(1, (pts || []).length) };
+    }
+    let cx = 0, cy = 0, a = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const cross = pts[j].x * pts[i].y - pts[i].x * pts[j].y;
+      a += cross;
+      cx += (pts[j].x + pts[i].x) * cross;
+      cy += (pts[j].y + pts[i].y) * cross;
+    }
+    a *= 0.5;
+    if (Math.abs(a) < 1e-9) {
+      // Degenerate fallback (zero-area polygon)
+      let x = 0, y = 0;
+      for (const p of pts) { x += p.x; y += p.y; }
+      return { x: x / pts.length, y: y / pts.length };
+    }
+    return { x: cx / (6 * a), y: cy / (6 * a) };
   }
 
   // ---------- Right-click context menu ----------
@@ -1693,9 +1984,9 @@
     const idx = state.objects.indexOf(o);
     const isFront = idx === state.objects.length - 1;
     const isBack = idx === 0;
-    const supportsFill = o.type === 'room' || o.type === 'window' || o.type === 'text';
+    const supportsFill = o.type === 'room' || o.type === 'polygon' || o.type === 'window' || o.type === 'text';
     const supportsStroke = o.type !== 'text';
-    const supportsOutline = o.type === 'room' || o.type === 'wall';
+    const supportsOutline = o.type === 'room' || o.type === 'polygon' || o.type === 'wall';
 
     // Quick-action icon row: Undo / Redo / Delete
     frag.appendChild(ctxIconRow([
@@ -1764,6 +2055,28 @@
         pushHistory();
         o.showArea = !o.showArea;
         if (o.showArea && !o.areaPos) o.areaPos = { fx: 0.5, fy: 0.5 };
+        refreshAll();
+        scheduleAutosave();
+      }));
+    }
+
+    // Polygon-specific: same Add walls / Show area capabilities.
+    if (o.type === 'polygon' && o.closed) {
+      frag.appendChild(ctxItem('Add walls', () => {
+        pushHistory();
+        const walls = addWallsForPolygon(o);
+        flash(`Added ${walls.length} walls`);
+        refreshAll();
+        scheduleAutosave();
+      }, { disabled: !!o.locked }));
+      frag.appendChild(ctxItem(o.showArea ? 'Hide area' : 'Show area', () => {
+        pushHistory();
+        o.showArea = !o.showArea;
+        // Centroid is the natural default; user can drag it elsewhere.
+        if (o.showArea && !o.areaPos) {
+          const c = polygonCentroid(o.points);
+          o.areaPos = { x: c.x, y: c.y };
+        }
         refreshAll();
         scheduleAutosave();
       }));
@@ -2840,7 +3153,19 @@
       if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
       if (k === 'd') { e.preventDefault(); duplicateSelection(); return; }
     }
-    const map = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
+    const map = { v: 'select', r: 'room', p: 'polygon', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
+    // Polygon drafting captures Enter / Esc / Backspace before the global handlers.
+    if (drag && drag.mode === 'polygon-draft') {
+      if (e.key === 'Enter') { e.preventDefault(); finalizePolygonDraft(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); cancelPolygonDraft(); return; }
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        const o = drag.obj;
+        if (o.points.length > 1) { o.points.pop(); draw(); }
+        else cancelPolygonDraft();
+        return;
+      }
+    }
     if (map[e.key.toLowerCase()]) {
       const tool = map[e.key.toLowerCase()];
       const btn = document.querySelector(`.tool[data-tool="${tool}"]`);
@@ -2918,6 +3243,7 @@
   // Layer category metadata + active tab
   const LAYER_CATEGORIES = [
     { key: 'room',    label: 'Rooms',        icon: 'i-cat-room' },
+    { key: 'polygon', label: 'Polygons',     icon: 'i-cat-polygon' },
     { key: 'wall',    label: 'Walls',        icon: 'i-cat-wall' },
     { key: 'door',    label: 'Doors',        icon: 'i-cat-door' },
     { key: 'window',  label: 'Windows',      icon: 'i-cat-window' },
