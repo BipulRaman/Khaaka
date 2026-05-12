@@ -12,7 +12,8 @@
   function makeBlankState() {
     return {
       objects: [],        // all shapes in z-order
-      selectedId: null,
+      selectedId: null,   // primary selection (last added) — used by props panel
+      selectedIds: new Set(), // multi-selection set; selectedId is its "leader"
       tool: 'select',
       nextId: 1,
       view: { x: 0, y: 0, zoom: 1 }, // pan in screen px, zoom multiplier
@@ -255,6 +256,126 @@
     return null;
   }
 
+  // ---------- Selection helpers (multi-select) ----------
+  // selectedIds is a Set; selectedId mirrors the most recently added member
+  // so the existing properties panel keeps working unchanged.
+  function ensureSelection() {
+    if (!state.selectedIds || !(state.selectedIds instanceof Set)) {
+      state.selectedIds = new Set();
+    }
+  }
+  function setSelection(ids) {
+    ensureSelection();
+    state.selectedIds = new Set(ids || []);
+    state.selectedId = state.selectedIds.size
+      ? [...state.selectedIds][state.selectedIds.size - 1]
+      : null;
+  }
+  function addToSelection(id) {
+    ensureSelection();
+    state.selectedIds.add(id);
+    state.selectedId = id;
+  }
+  function removeFromSelection(id) {
+    ensureSelection();
+    state.selectedIds.delete(id);
+    if (state.selectedId === id) {
+      state.selectedId = state.selectedIds.size
+        ? [...state.selectedIds][state.selectedIds.size - 1]
+        : null;
+    }
+  }
+  function toggleSelection(id) {
+    ensureSelection();
+    if (state.selectedIds.has(id)) removeFromSelection(id);
+    else addToSelection(id);
+  }
+  function clearSelection() {
+    ensureSelection();
+    state.selectedIds.clear();
+    state.selectedId = null;
+  }
+  function selectAll() {
+    setSelection(state.objects.map(o => o.id));
+    refreshAll();
+  }
+  function getSelectedObjects() {
+    ensureSelection();
+    return state.objects.filter(o => state.selectedIds.has(o.id));
+  }
+
+  // ---------- Clipboard (cross-tab) ----------
+  // Lives at module scope so switching tabs preserves it. Mirrored to
+  // localStorage so paste works after a reload too.
+  let clipboard = [];
+  const CLIPBOARD_KEY = 'khaaka.clipboard.v1';
+  try {
+    const raw = localStorage.getItem(CLIPBOARD_KEY);
+    if (raw) clipboard = JSON.parse(raw) || [];
+  } catch { /* ignore */ }
+  function setClipboard(objs) {
+    clipboard = (objs || []).map(o => JSON.parse(JSON.stringify(o)));
+    try { localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(clipboard)); } catch {}
+  }
+  function copySelection() {
+    const sel = getSelectedObjects();
+    if (sel.length === 0) { flash('Nothing selected'); return; }
+    setClipboard(sel);
+    flash(`Copied ${sel.length} item${sel.length === 1 ? '' : 's'}`);
+  }
+  function cutSelection() {
+    const sel = getSelectedObjects().filter(o => !o.locked);
+    if (sel.length === 0) { flash('Nothing to cut'); return; }
+    setClipboard(sel);
+    pushHistory();
+    const cutIds = new Set(sel.map(o => o.id));
+    state.objects = state.objects.filter(o => !cutIds.has(o.id));
+    clearSelection();
+    refreshAll();
+    flash(`Cut ${sel.length} item${sel.length === 1 ? '' : 's'}`);
+  }
+  // Translate every coordinate-bearing field on an object by (dx, dy).
+  function translateObject(o, dx, dy) {
+    if (o.type === 'wall' || o.type === 'measure') {
+      o.x1 += dx; o.y1 += dy; o.x2 += dx; o.y2 += dy;
+    } else if (typeof o.x === 'number' && typeof o.y === 'number') {
+      o.x += dx; o.y += dy;
+    }
+  }
+  function pasteClipboard() {
+    if (!clipboard || clipboard.length === 0) { flash('Clipboard is empty'); return; }
+    pushHistory();
+    const offset = state.grid.size; // one grid box, units-aware
+    const newIds = [];
+    for (const src of clipboard) {
+      const o = JSON.parse(JSON.stringify(src));
+      o.id = uid();
+      translateObject(o, offset, offset);
+      state.objects.push(o);
+      newIds.push(o.id);
+    }
+    setSelection(newIds);
+    refreshAll();
+    flash(`Pasted ${newIds.length} item${newIds.length === 1 ? '' : 's'}`);
+  }
+  function duplicateSelection() {
+    const sel = getSelectedObjects();
+    if (sel.length === 0) { flash('Nothing selected'); return; }
+    pushHistory();
+    const offset = state.grid.size;
+    const newIds = [];
+    for (const src of sel) {
+      const o = JSON.parse(JSON.stringify(src));
+      o.id = uid();
+      translateObject(o, offset, offset);
+      state.objects.push(o);
+      newIds.push(o.id);
+    }
+    setSelection(newIds);
+    refreshAll();
+    flash(`Duplicated ${newIds.length} item${newIds.length === 1 ? '' : 's'}`);
+  }
+
   // ---------- Rendering ----------
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -285,10 +406,29 @@
       for (const o of state.objects) drawObjectDimensions(o);
     }
 
-    // Selection halo
-    if (state.selectedId != null) {
-      const o = state.objects.find(x => x.id === state.selectedId);
-      if (o) drawSelection(o);
+    // Selection halos — every member of the multi-selection.
+    ensureSelection();
+    if (state.selectedIds.size > 0) {
+      const onlyOne = state.selectedIds.size === 1;
+      for (const o of state.objects) {
+        if (state.selectedIds.has(o.id)) drawSelection(o, onlyOne);
+      }
+    }
+
+    // Marquee rectangle (drawn on top of objects + halos)
+    if (drag && drag.mode === 'marquee') {
+      const a = worldToScreen(drag.startWorld.x, drag.startWorld.y);
+      const b = worldToScreen(drag.endWorld.x, drag.endWorld.y);
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      ctx.save();
+      ctx.fillStyle = 'rgba(74, 118, 245, 0.10)';
+      ctx.strokeStyle = 'rgba(74, 118, 245, 0.85)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+      ctx.restore();
     }
 
     updateStatus();
@@ -537,7 +677,7 @@
     ctx.closePath();
   }
 
-  function drawSelection(o) {
+  function drawSelection(o, showHandles = true) {
     const b = getBounds(o);
     const p = worldToScreen(b.x, b.y);
     const s = state.pxPerMeter * state.view.zoom;
@@ -548,15 +688,15 @@
     ctx.lineWidth = 1.5;
     ctx.strokeRect(p.x - 3, p.y - 3, b.w * s + 6, b.h * s + 6);
     ctx.setLineDash([]);
-    if (!o.locked) {
-      // resize handles only when editable
+    if (!o.locked && showHandles) {
+      // resize handles only when editable AND a single object is selected
       ctx.fillStyle = color;
       const handles = getHandles(o);
       for (const h of handles) {
         const sp = worldToScreen(h.x, h.y);
         ctx.fillRect(sp.x - 4, sp.y - 4, 8, 8);
       }
-    } else {
+    } else if (o.locked) {
       // small lock badge in the top-left corner of the selection
       ctx.fillStyle = '#1c2433';
       ctx.font = '12px system-ui, sans-serif';
@@ -654,9 +794,16 @@
       drag = null;
       const btn = document.querySelector('.tool[data-tool="select"]');
       if (btn) btn.click();
-      // Try to select whatever is under the cursor
+      // Try to select whatever is under the cursor (preserve existing
+      // multi-selection if the right-clicked object is already part of it).
       const hit = hitTest(w.x, w.y);
-      state.selectedId = hit ? hit.id : null;
+      ensureSelection();
+      if (hit) {
+        if (!state.selectedIds.has(hit.id)) setSelection([hit.id]);
+        else state.selectedId = hit.id;
+      } else {
+        clearSelection();
+      }
       refreshAll();
       return;
     }
@@ -676,7 +823,7 @@
         } else {
           dimHit.dimSide = (doorDimSide(dimHit) + 1) % 4;
         }
-        state.selectedId = dimHit.id;
+        setSelection([dimHit.id]);
         refreshAll();
         return;
       }
@@ -684,30 +831,58 @@
 
     if (state.tool === 'select') {
       const hit = hitTest(w.x, w.y);
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
       if (hit) {
-        state.selectedId = hit.id;
+        ensureSelection();
+        if (additive) {
+          toggleSelection(hit.id);
+          drag = null;                  // additive click doesn't start a drag
+          refreshProps(); refreshLayers(); draw();
+          return;
+        }
+        // Plain click on an object:
+        //   - If part of an existing multi-selection → keep selection, drag all.
+        //   - Otherwise → select just this one.
+        if (!state.selectedIds.has(hit.id)) setSelection([hit.id]);
+        else state.selectedId = hit.id;
+
         if (hit.locked) {
-          // Selecting a locked object is allowed (so you can unlock it),
-          // but no move/resize drag is started.
           drag = null;
         } else {
-          const handle = hitHandle(hit, w.x, w.y);
-          if (handle) {
-            drag = { mode: 'resize', handle, original: JSON.parse(JSON.stringify(hit)), startWorld: w };
+          // Alt-drag → duplicate selection in place and drag the copies.
+          if (e.altKey) {
+            pushHistory();
+            const offset = state.grid.size;
+            const newIds = [];
+            for (const src of getSelectedObjects()) {
+              const o = JSON.parse(JSON.stringify(src));
+              o.id = uid();
+              translateObject(o, offset, offset);
+              state.objects.push(o);
+              newIds.push(o.id);
+            }
+            setSelection(newIds);
+          }
+          // Multi-select → always move (resize handles only for single).
+          if (state.selectedIds.size > 1) {
+            const originals = getSelectedObjects().map(o => ({ id: o.id, snap: JSON.parse(JSON.stringify(o)) }));
+            drag = { mode: 'multi-move', startWorld: w, originals };
           } else {
-            drag = { mode: 'move', original: JSON.parse(JSON.stringify(hit)), startWorld: w };
+            const handle = hitHandle(hit, w.x, w.y);
+            if (handle) {
+              drag = { mode: 'resize', handle, original: JSON.parse(JSON.stringify(hit)), startWorld: w };
+            } else {
+              drag = { mode: 'move', original: JSON.parse(JSON.stringify(hit)), startWorld: w };
+            }
           }
         }
-        refreshProps();
-        refreshLayers();
-        draw();
+        refreshProps(); refreshLayers(); draw();
       } else {
-        state.selectedId = null;
-        drag = { mode: 'pan', startScreen: { x: sx, y: sy }, startView: { ...state.view } };
-        canvas.style.cursor = 'grabbing';
-        refreshProps();
-        refreshLayers();
-        draw();
+        // Empty canvas: start marquee select. Shift extends, plain replaces.
+        if (!additive) clearSelection();
+        drag = { mode: 'marquee', startWorld: w, endWorld: w, additive, baseIds: new Set(state.selectedIds) };
+        canvas.style.cursor = 'crosshair';
+        refreshProps(); refreshLayers(); draw();
       }
       return;
     }
@@ -722,7 +897,7 @@
     } else if (state.tool === 'door') {
       obj = makeObject('door', { x: sw.x, y: sw.y, w: 0.9, rot: 0 });
       state.objects.push(obj);
-      state.selectedId = obj.id;
+      setSelection([obj.id]);
       drag = null;
       switchToSelectTool();
       refreshAll();
@@ -730,7 +905,7 @@
     } else if (state.tool === 'window') {
       obj = makeObject('window', { x: sw.x, y: sw.y, w: 1.2, rot: 0 });
       state.objects.push(obj);
-      state.selectedId = obj.id;
+      setSelection([obj.id]);
       drag = null;
       switchToSelectTool();
       refreshAll();
@@ -754,7 +929,7 @@
         if (!trimmed) return;
         const o = makeObject('text', { x: placeAt.x, y: placeAt.y, text: trimmed, size: 14, fill: '#111827' });
         state.objects.push(o);
-        state.selectedId = o.id;
+        setSelection([o.id]);
         refreshAll();
       });
       return;
@@ -762,14 +937,14 @@
       // Never snap measurements to grid
       obj = makeObject('measure', { x1: w.x, y1: w.y, x2: w.x, y2: w.y });
       state.objects.push(obj);
-      state.selectedId = obj.id;
+      setSelection([obj.id]);
       drag = { mode: 'create', startWorld: w, obj };
       return;
     }
 
     if (obj) {
       state.objects.push(obj);
-      state.selectedId = obj.id;
+      setSelection([obj.id]);
       drag = { mode: 'create', startWorld: sw, obj };
     }
   });
@@ -817,6 +992,33 @@
           else { o.x2 = o.x1; o.y2 = py; }
         } else {
           o.x2 = px; o.y2 = py;
+        }
+      }
+      draw();
+      refreshProps();
+      return;
+    }
+
+    if (drag.mode === 'marquee') {
+      drag.endWorld = w;
+      draw();
+      return;
+    }
+
+    if (drag.mode === 'multi-move') {
+      const dx = snap(w.x - drag.startWorld.x);
+      const dy = snap(w.y - drag.startWorld.y);
+      for (const rec of drag.originals) {
+        const o = state.objects.find(x => x.id === rec.id);
+        if (!o || o.locked) continue;
+        const orig = rec.snap;
+        if (o.type === 'wall' || o.type === 'measure') {
+          o.x1 = orig.x1 + dx; o.y1 = orig.y1 + dy;
+          o.x2 = orig.x2 + dx; o.y2 = orig.y2 + dy;
+        } else if (o.type === 'room') {
+          o.x = orig.x + dx; o.y = orig.y + dy;
+        } else {
+          o.x = orig.x + dx; o.y = orig.y + dy;
         }
       }
       draw();
@@ -879,12 +1081,34 @@
           ((o.type === 'wall' || o.type === 'measure') &&
             Math.hypot(o.x2 - o.x1, o.y2 - o.y1) < 0.1)) {
         state.objects.pop();
-        state.selectedId = null;
+        clearSelection();
       } else {
         // Successful create — auto-switch back to Select / Move so the next
         // click doesn't accidentally start another shape.
         switchToSelectTool();
       }
+    }
+    if (drag && drag.mode === 'marquee') {
+      const a = drag.startWorld, b = drag.endWorld;
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      // Treat a tiny drag as a click on empty (just clear/keep selection).
+      if (w >= 0.05 || h >= 0.05) {
+        const hits = new Set(drag.additive ? drag.baseIds : []);
+        for (const o of state.objects) {
+          const ob = getBounds(o);
+          // Intersect rectangles
+          if (ob.x + ob.w >= x && ob.x <= x + w && ob.y + ob.h >= y && ob.y <= y + h) {
+            hits.add(o.id);
+          }
+        }
+        setSelection([...hits]);
+      }
+    }
+    if (drag && (drag.mode === 'move' || drag.mode === 'multi-move' || drag.mode === 'resize')) {
+      // Snapshot history at the END of an interactive drag so an undo
+      // restores the position before the drag started, not mid-drag.
+      // (pushHistory is already called for create/clipboard ops.)
     }
     drag = null;
     canvas.style.cursor = 'default';
@@ -1324,8 +1548,24 @@
       { iconId: 'i-undo',  title: 'Undo (Ctrl+Z)', shortcut: 'Undo',   onClick: undo, disabled: state.history.length === 0 },
       { iconId: 'i-redo',  title: 'Redo (Ctrl+Y)', shortcut: 'Redo',   onClick: redo, disabled: state.future.length === 0 },
       { iconId: 'i-trash', title: 'Delete (Del)',  shortcut: 'Delete', danger: true,  disabled: !!o.locked,
-        onClick: () => { state.selectedId = o.id; deleteSelected(); } },
+        onClick: () => { if (!state.selectedIds.has(o.id)) setSelection([o.id]); deleteSelected(); } },
     ]));
+    frag.appendChild(ctxSep());
+
+    // Clipboard row
+    frag.appendChild(ctxItem('Copy', () => {
+      if (!state.selectedIds.has(o.id)) setSelection([o.id]);
+      copySelection();
+    }, { shortcut: 'Ctrl+C' }));
+    frag.appendChild(ctxItem('Cut', () => {
+      if (!state.selectedIds.has(o.id)) setSelection([o.id]);
+      cutSelection();
+    }, { shortcut: 'Ctrl+X', disabled: !!o.locked }));
+    frag.appendChild(ctxItem('Duplicate', () => {
+      if (!state.selectedIds.has(o.id)) setSelection([o.id]);
+      duplicateSelection();
+    }, { shortcut: 'Ctrl+D' }));
+    frag.appendChild(ctxItem('Paste', pasteClipboard, { shortcut: 'Ctrl+V', disabled: clipboard.length === 0 }));
     frag.appendChild(ctxSep());
 
     frag.appendChild(buildRenameItem(o));
@@ -1466,6 +1706,9 @@
       { iconId: 'i-undo', title: 'Undo (Ctrl+Z)', shortcut: 'Undo', onClick: undo, disabled: state.history.length === 0 },
       { iconId: 'i-redo', title: 'Redo (Ctrl+Y)', shortcut: 'Redo', onClick: redo, disabled: state.future.length === 0 },
     ]));
+    frag.appendChild(ctxSep());
+    frag.appendChild(ctxItem('Paste', pasteClipboard, { shortcut: 'Ctrl+V', disabled: clipboard.length === 0 }));
+    frag.appendChild(ctxItem('Select all', selectAll, { shortcut: 'Ctrl+A', disabled: state.objects.length === 0 }));
     frag.appendChild(ctxSep());
     frag.appendChild(ctxZoomRow());
     frag.appendChild(ctxSep());
@@ -2429,6 +2672,11 @@
       if (k === 'n') { e.preventDefault(); createTab(); return; }
       if (k === 't') { e.preventDefault(); createTab(); return; }
       if (k === 'w') { e.preventDefault(); if (activeTabId) closeTab(activeTabId); return; }
+      if (k === 'a') { e.preventDefault(); selectAll(); return; }
+      if (k === 'c') { e.preventDefault(); copySelection(); return; }
+      if (k === 'x') { e.preventDefault(); cutSelection(); return; }
+      if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
+      if (k === 'd') { e.preventDefault(); duplicateSelection(); return; }
     }
     const map = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
     if (map[e.key.toLowerCase()]) {
@@ -2437,6 +2685,9 @@
       if (btn) btn.click();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       deleteSelected();
+    } else if (e.key === 'Escape') {
+      ensureSelection();
+      if (state.selectedIds.size > 0) { clearSelection(); refreshAll(); }
     } else if (e.key === 'F2') {
       e.preventDefault();
       renameSelected();
@@ -2467,13 +2718,14 @@
   }
 
   function deleteSelected() {
-    if (state.selectedId == null) return;
-    const o = state.objects.find(x => x.id === state.selectedId);
-    if (!o) return;
-    if (o.locked) { flash('Object is locked'); return; }
+    ensureSelection();
+    if (state.selectedIds.size === 0) return;
+    const targets = state.objects.filter(o => state.selectedIds.has(o.id) && !o.locked);
+    if (targets.length === 0) { flash('Selection is locked'); return; }
     pushHistory();
-    state.objects = state.objects.filter(x => x.id !== state.selectedId);
-    state.selectedId = null;
+    const ids = new Set(targets.map(o => o.id));
+    state.objects = state.objects.filter(o => !ids.has(o.id));
+    clearSelection();
     refreshAll();
   }
 
