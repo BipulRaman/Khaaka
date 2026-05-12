@@ -3260,7 +3260,7 @@
   // ---------- Multi-tab bootstrap ----------
   // Restore the saved tab list (handles via IDB, snapshots via localStorage,
   // legacy single-tab key migrated automatically). If nothing to restore,
-  // create a fresh tab and seed the sample layout.
+  // start with a single empty tab — clean slate, no demo content.
   (async () => {
     const restored = await restoreTabs();
     if (!restored) {
@@ -3268,7 +3268,6 @@
       tabs.push(t);
       activeTabId = t.id;
       hydrateTab(t);
-      seedSampleLayout();
     }
     syncUIFromState();
     refreshAll();
