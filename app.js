@@ -1044,7 +1044,7 @@
       return;
     }
 
-    // Right-click: switch to Select / Move mode
+    // Right-click: switch to Hand / Pan mode
     if (e.button === 2) {
       // Cancel any in-progress create drag and remove the partial shape
       if (drag && drag.mode === 'create' && drag.obj) {
@@ -1111,6 +1111,22 @@
       }
     }
 
+    if (state.tool === 'marquee') {
+      // Dedicated free-select tool: always marquee on drag.
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      drag = {
+        mode: 'marquee',
+        startWorld: w,
+        endWorld: w,
+        additive,
+        baseIds: new Set(additive ? state.selectedIds : []),
+        fromMarqueeTool: true,
+      };
+      canvas.style.cursor = 'default';
+      refreshProps(); refreshLayers(); draw();
+      return;
+    }
+
     if (state.tool === 'select') {
       const hit = hitTest(w.x, w.y);
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -1160,10 +1176,21 @@
         }
         refreshProps(); refreshLayers(); draw();
       } else {
-        // Empty canvas: start marquee select. Shift extends, plain replaces.
-        if (!additive) clearSelection();
-        drag = { mode: 'marquee', startWorld: w, endWorld: w, additive, baseIds: new Set(state.selectedIds) };
-        canvas.style.cursor = 'crosshair';
+        // Empty canvas in Hand tool:
+        //  - plain drag pans the sheet
+        //  - Shift/Ctrl/Cmd drag performs marquee select
+        if (additive) {
+          drag = { mode: 'marquee', startWorld: w, endWorld: w, additive, baseIds: new Set(state.selectedIds) };
+          canvas.style.cursor = 'crosshair';
+        } else {
+          drag = {
+            mode: 'pan',
+            startScreen: { x: sx, y: sy },
+            startView: { ...state.view },
+            fromEmptySelect: true,
+          };
+          canvas.style.cursor = 'grabbing';
+        }
         refreshProps(); refreshLayers(); draw();
       }
       return;
@@ -1268,6 +1295,10 @@
     const sw = { x: snap(w.x), y: snap(w.y) };
 
     if (!drag) {
+      if (state.tool === 'marquee') {
+        canvas.style.cursor = 'default';
+        return;
+      }
       // Idle hover: show pointer cursor over clickable labels.
       if (state.tool === 'select' && hitAreaLabel(sx, sy)) {
         canvas.style.cursor = 'grab';
@@ -1423,6 +1454,11 @@
   });
 
   canvas.addEventListener('mouseup', () => {
+    // Empty click in Select mode should still clear selection.
+    if (drag && drag.mode === 'pan' && drag.fromEmptySelect) {
+      const moved = Math.hypot(state.view.x - drag.startView.x, state.view.y - drag.startView.y);
+      if (moved < 2) clearSelection();
+    }
     if (drag && drag.mode === 'create') {
       const o = drag.obj;
       // Discard zero-size shapes
@@ -1441,8 +1477,16 @@
       const a = drag.startWorld, b = drag.endWorld;
       const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
       const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-      // Treat a tiny drag as a click on empty (just clear/keep selection).
-      if (w >= 0.05 || h >= 0.05) {
+      // In dedicated marquee tool, tiny drag behaves like a click-to-select.
+      if ((w < 0.05 && h < 0.05) && drag.fromMarqueeTool) {
+        const hit = hitTest(a.x, a.y);
+        if (hit) {
+          if (drag.additive) toggleSelection(hit.id);
+          else setSelection([hit.id]);
+        } else if (!drag.additive) {
+          clearSelection();
+        }
+      } else if (w >= 0.05 || h >= 0.05) {
         const hits = new Set(drag.additive ? drag.baseIds : []);
         for (const o of state.objects) {
           const ob = getBounds(o);
@@ -1477,7 +1521,7 @@
     }
   });
 
-  // Programmatically activate the Select tool (also updates toolbar state).
+  // Programmatically activate the Hand tool (also updates toolbar state).
   function switchToSelectTool() {
     if (state.tool === 'select') return;
     const btn = document.querySelector('.tool[data-tool="select"]');
@@ -2280,7 +2324,8 @@
       btn.classList.add('active');
       state.tool = btn.dataset.tool;
       const hints = {
-        select: 'Click to select. Drag to move. Drag handles to resize. Scroll to zoom.',
+        select: 'Hand tool: click to select and drag objects to move. Empty-drag to pan. Scroll to zoom.',
+        marquee: 'Mouse free select: drag to draw a selection box. Hold Shift/Ctrl/Cmd to add/remove.',
         room: 'Click and drag to draw a room.',
         wall: 'Click and drag to draw a wall. Hold Shift for straight lines.',
         door: 'Click to drop a door. Drag the end handle to set width / angle.',
@@ -3153,7 +3198,7 @@
       if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
       if (k === 'd') { e.preventDefault(); duplicateSelection(); return; }
     }
-    const map = { v: 'select', r: 'room', p: 'polygon', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
+    const map = { h: 'select', v: 'marquee', r: 'room', p: 'polygon', w: 'wall', d: 'door', n: 'window', t: 'text', m: 'measure' };
     // Polygon drafting captures Enter / Esc / Backspace before the global handlers.
     if (drag && drag.mode === 'polygon-draft') {
       if (e.key === 'Enter') { e.preventDefault(); finalizePolygonDraft(); return; }

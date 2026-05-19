@@ -29,6 +29,7 @@
 
       <!-- Tools -->
       <symbol id="i-cursor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6-2.4 6L5 3z"/></symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11V7a1.5 1.5 0 0 1 3 0v4"/><path d="M10 11V6a1.5 1.5 0 0 1 3 0v5"/><path d="M13 11V7a1.5 1.5 0 0 1 3 0v5"/><path d="M16 12V9a1.5 1.5 0 0 1 3 0v5.5a5.5 5.5 0 0 1-5.5 5.5h-1.2a6 6 0 0 1-4.6-2.1L4.5 14a1.6 1.6 0 0 1 2.3-2.2L9 14"/></symbol>
       <symbol id="i-room"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.2"/></symbol>
       <symbol id="i-polygon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 6-3.5 11h-11L3 9z"/></symbol>
       <symbol id="i-wall"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 19L20 5"/></symbol>
@@ -177,7 +178,10 @@
     <!-- ============================== TOOLBAR ============================== -->
     <aside class="toolbar" aria-label="Tools">
       <div class="tool-group">
-        <button class="tool active" data-tool="select" title="Select / Move (V)">
+        <button class="tool active" data-tool="select" title="Hand / Pan (H)">
+          <svg class="ic"><use href="#i-hand"/></svg>
+        </button>
+        <button class="tool" data-tool="marquee" title="Mouse Free Select (V)">
           <svg class="ic"><use href="#i-cursor"/></svg>
         </button>
       </div>
@@ -206,7 +210,7 @@
     <!-- ============================== CANVAS ============================== -->
     <section class="canvas-wrap">
       <canvas id="canvas"></canvas>
-      <div class="hint" id="hint" hidden>Pick a tool and start drawing. Wheel to zoom, middle-drag to pan. Right-click switches to Select / Move.</div>
+      <div class="hint" id="hint" hidden>Pick a tool and start drawing. Hand tool pans by default, Mouse tool does free select. Wheel to zoom, middle-drag to pan. Right-click switches to Hand / Pan.</div>
       <div class="toast" id="toast" hidden></div>
       <div class="zoom-bar" id="status" role="group" aria-label="Zoom">
         <span class="sel-area" id="sel-area" title="Area of selected rooms"></span>
