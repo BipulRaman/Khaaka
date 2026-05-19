@@ -1,0 +1,117 @@
+name: Khaaka.Web
+
+on:
+  push:
+    paths:
+      - app/**
+      - .github/workflows/deploy-web.yml
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-web-branch
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Stage site to dist/
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          cp -R app/. dist/
+
+      - name: Stamp asset version
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_SHA::7}"
+          [ -f dist/index.html ] || { echo "::error::Missing dist/index.html"; exit 1; }
+          sed -i "s|href=\"styles.css\"|href=\"styles.css?v=${VERSION}\"|g" dist/index.html
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=${VERSION}\"|g" dist/index.html
+          grep -q "styles.css?v=${VERSION}" dist/index.html || { echo "::error::styles.css version stamp failed"; exit 1; }
+          grep -q "app.js?v=${VERSION}" dist/index.html || { echo "::error::app.js version stamp failed"; exit 1; }
+          echo "Stamped asset version = ${VERSION}"
+
+      - name: Install minifiers
+        run: |
+          npm install --no-save --no-audit --no-fund --silent \
+            html-minifier-terser@7 terser@5 clean-css-cli@5
+
+      - name: Minify HTML / CSS / JS
+        run: |
+          set -euo pipefail
+
+          replace_min() {
+            local src=$1 min=$2
+            [ -s "$min" ] || { echo "::error::Minify produced empty output for $src"; exit 1; }
+            local before after
+            before=$(wc -c < "$src")
+            after=$(wc -c < "$min")
+            mv "$min" "$src"
+            echo "$src: $before -> $after bytes"
+          }
+
+          minify_js() {
+            local src=$1
+            npx --no-install terser "$src" \
+              --compress passes=2,drop_console=false --mangle --format comments=false \
+              -o "${src}.min"
+            node --input-type=commonjs --check < "${src}.min" \
+              || { echo "::error::Minified $src failed node --check"; exit 1; }
+            replace_min "$src" "${src}.min"
+          }
+
+          npx --no-install html-minifier-terser \
+            --collapse-whitespace --conservative-collapse \
+            --remove-comments --remove-redundant-attributes \
+            --remove-script-type-attributes --remove-style-link-type-attributes \
+            --use-short-doctype --minify-css true \
+            -o dist/index.html.min dist/index.html
+          replace_min dist/index.html dist/index.html.min
+
+          npx --no-install cleancss -O1 -o dist/styles.css.min dist/styles.css
+          replace_min dist/styles.css dist/styles.css.min
+
+          minify_js dist/app.js
+
+      - name: Smoke test build
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          have() { grep -qF "$2" "$1" || fail "$1 missing: $2"; }
+
+          for f in dist/index.html dist/styles.css dist/app.js dist/CNAME; do
+            [ -s "$f" ] || fail "Required file missing or empty: $f"
+          done
+
+          have dist/index.html 'href="styles.css?v='
+          have dist/index.html 'src="app.js?v='
+          have dist/index.html 'Khaaka'
+
+          have dist/app.js 'use strict'
+          have dist/app.js 'canvas'
+
+          echo "Smoke tests passed."
+
+      - name: Deploy dist/ to web branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: web
+          force_orphan: true
