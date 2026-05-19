@@ -542,7 +542,7 @@ button { font-family: inherit; }
 }
 #canvas { display: block; width: 100%; height: 100%; cursor: default; }
 
-.hint, .zoom-bar, .toast {
+.hint, .toast {
   position: absolute;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px) saturate(140%);
@@ -556,14 +556,104 @@ button { font-family: inherit; }
   box-shadow: var(--shadow-md);
 }
 .hint  { top: 14px;    left: 14px; font-weight: 500; }
+
+.footbar {
+  flex: 0 0 auto;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, #f9fbff 0%, #eef3fa 100%);
+}
+
+.footbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font: 500 11px "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.footbar-left .ic-heart {
+  width: 12px;
+  height: 12px;
+  color: #e11d48;
+}
+
+.footbar-left .country-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.footbar-left .flag-in {
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.08);
+}
+
+.footbar-left .dot-sep {
+  color: var(--muted-2);
+  margin: 0 2px;
+}
+
+.footbar-left .github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-soft);
+  text-decoration: none;
+  border-radius: 6px;
+  padding: 2px 4px;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.footbar-left .github-link:hover {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.footbar-left .github-link:focus-visible {
+  outline: none;
+  box-shadow: var(--accent-glow);
+}
+
+.footbar-left .ic-gh {
+  width: 12px;
+  height: 12px;
+}
+
+.footbar-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-soft);
+  font: 500 11px "Inter", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .zoom-bar {
-  bottom: 14px;
-  right: 14px;
+  margin-left: auto;
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: var(--shadow-md);
   font-variant-numeric: tabular-nums;
   font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
   font-size: 11px;

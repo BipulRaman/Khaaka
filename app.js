@@ -42,6 +42,7 @@
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   const hint = document.getElementById('hint');
+  const statusMsg = document.getElementById('status-msg');
   const layerList = document.getElementById('layer-list');
 
   // ---------- Limited color palettes (light shades only) ----------
@@ -994,7 +995,23 @@
   }
 
   // ---------- Status / Hint ----------
-  function setHint(msg) { hint.textContent = msg; }
+  function toolHint(tool) {
+    const hints = {
+      select: 'Hand tool: click to select and drag objects to move. Empty-drag to pan. Ctrl + click-drag to box-select. Scroll to zoom.',
+      marquee: 'Mouse free select: click-drag to draw a selection box. Ctrl + click-drag also works for selection. Hold Shift/Ctrl/Cmd to add/remove. Right-click to switch to Hand tool.',
+      room: 'Click and drag to draw a room.',
+      wall: 'Click and drag to draw a wall. Hold Shift for straight lines.',
+      door: 'Click to drop a door. Drag the end handle to set width / angle.',
+      window: 'Click to drop a window. Drag the end handle to set width / angle.',
+      text: 'Click to place a text label.',
+      measure: 'Click and drag to measure a distance.',
+    };
+    return hints[tool] || '';
+  }
+  function setHint(msg) {
+    hint.textContent = msg;
+    if (statusMsg) statusMsg.textContent = msg;
+  }
   function updateStatus() {
     const pct = document.getElementById('btn-zoom-reset-bar');
     if (pct) pct.textContent = `${Math.round(state.view.zoom * 100)}%`;
@@ -2323,17 +2340,7 @@
       document.querySelectorAll('.tool').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.tool = btn.dataset.tool;
-      const hints = {
-        select: 'Hand tool: click to select and drag objects to move. Empty-drag to pan. Scroll to zoom.',
-        marquee: 'Mouse free select: drag to draw a selection box. Hold Shift/Ctrl/Cmd to add/remove.',
-        room: 'Click and drag to draw a room.',
-        wall: 'Click and drag to draw a wall. Hold Shift for straight lines.',
-        door: 'Click to drop a door. Drag the end handle to set width / angle.',
-        window: 'Click to drop a window. Drag the end handle to set width / angle.',
-        text: 'Click to place a text label.',
-        measure: 'Click and drag to measure a distance.',
-      };
-      setHint(hints[state.tool] || '');
+      setHint(toolHint(state.tool));
     });
   });
 
@@ -2606,6 +2613,7 @@
     document.querySelectorAll('.tool[data-tool]').forEach(b => {
       b.classList.toggle('active', b.dataset.tool === state.tool);
     });
+    setHint(toolHint(state.tool));
     if (typeof refreshUnitLabels === 'function') refreshUnitLabels();
   }
 
